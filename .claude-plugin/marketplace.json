@@ -1,0 +1,15 @@
+{
+  "name": "ordvik",
+  "description": "Agent toolkit — planning model, RFC management, dispatch documents, and reporting",
+  "owner": {
+    "name": "Ken Fox"
+  },
+  "plugins": [
+    {
+      "name": "ordvik",
+      "description": "Agent toolkit — planning model, RFC management, dispatch documents, and reporting",
+      "source": "./plugins/ordvik",
+      "category": "development"
+    }
+  ]
+}

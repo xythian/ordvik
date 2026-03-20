@@ -1,0 +1,628 @@
+#!/usr/bin/env python3
+"""Worktree manager for parallel agent working trees.
+
+Manages git worktrees as sibling directories, with tmux integration
+for launching agents alongside shell panes. Parses dispatch doc
+frontmatter to automate worktree creation and agent launch.
+
+Worktrees are created as sibling directories:
+  /path/to/repo                    (main checkout)
+  /path/to/repo--feature-monitor   (worktree)
+  /path/to/repo--fix-search-backup    (worktree)
+
+Usage:
+  wt new <branch> [base] [--agent <cmd>]   Create a worktree with a new branch
+  wt open <branch> [--agent <cmd>]         Open agent + shell in an existing worktree
+  wt launch <dispatch-doc>...              Create worktrees from dispatch docs and launch agents
+  wt list                                  List all worktrees
+  wt push [branch]                         Push the current (or named) branch to origin
+  wt force-push [branch]                   Force-push branch to origin (--force-with-lease)
+  wt rm <branch> [--force]                 Remove a worktree and delete the local branch
+  wt clean [--commit]                      Remove worktrees whose branches are merged
+
+Part of the ordvik agent toolkit. Install to a repo with:
+  /ordvik:init (offers to copy this script to scripts/wt)
+"""
+import os
+import shlex
+import subprocess
+import sys
+import yaml
+
+DEFAULT_AGENT = "claude"
+
+def pop_flag(args, flag, default=None):
+    """Remove --flag <value> from args, returning (remaining_args, value)."""
+    if flag not in args:
+        return args, default
+    idx = args.index(flag)
+    if idx + 1 >= len(args):
+        print(f"Error: {flag} requires a value.")
+        sys.exit(1)
+    value = args[idx + 1]
+    return args[:idx] + args[idx + 2:], value
+
+
+def git(*args, check=True, capture=True):
+    """Run a git command, returning stdout."""
+    r = subprocess.run(
+        ["git"] + list(args),
+        capture_output=capture,
+        text=True,
+        check=check,
+    )
+    return r.stdout.strip() if capture else ""
+
+
+def git_in(root, *args, **kwargs):
+    """Run a git command with -C <root>."""
+    return git("-C", root, *args, **kwargs)
+
+
+def main_root():
+    """Resolve the main worktree root (works from any worktree)."""
+    porcelain = git("worktree", "list", "--porcelain")
+    first_line = porcelain.splitlines()[0]
+    return first_line.removeprefix("worktree ")
+
+
+def main_branch(root):
+    """Detect master or main."""
+    for name in ("master", "main"):
+        try:
+            git_in(root, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")
+            return name
+        except subprocess.CalledProcessError:
+            continue
+    return "master"
+
+
+def slug(branch):
+    """feature/foo-bar → feature-foo-bar"""
+    return branch.replace("/", "-")
+
+
+def wt_path(root, branch):
+    parent = os.path.dirname(root)
+    repo = os.path.basename(root)
+    return os.path.join(parent, f"{repo}--{slug(branch)}")
+
+
+def parse_worktrees(root):
+    """Parse git worktree list --porcelain into a list of dicts."""
+    porcelain = git_in(root, "worktree", "list", "--porcelain")
+    worktrees = []
+    current = {}
+    for line in porcelain.splitlines():
+        if line.startswith("worktree "):
+            if current:
+                worktrees.append(current)
+            current = {"path": line.removeprefix("worktree ")}
+        elif line.startswith("branch "):
+            current["branch"] = line.removeprefix("branch refs/heads/")
+        elif line == "bare":
+            current["bare"] = True
+        elif line == "detached":
+            current["detached"] = True
+        elif not line:
+            pass
+    if current:
+        worktrees.append(current)
+    return worktrees
+
+
+def tmux_window_names():
+    """Return set of active tmux window names across all sessions."""
+    try:
+        result = subprocess.run(
+            ["tmux", "list-windows", "-a", "-F", "#{window_name}"],
+            capture_output=True, text=True, check=True,
+        )
+        return set(result.stdout.strip().splitlines())
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return set()
+
+
+def has_tmux_window(branch):
+    """Check if there's an active tmux window for this branch."""
+    name = branch.split("/", 1)[-1]
+    return name in tmux_window_names()
+
+
+def remote_branches(root):
+    """Return set of remote branch names (without origin/ prefix)."""
+    try:
+        git_in(root, "fetch", "--prune", "origin", check=True)
+    except subprocess.CalledProcessError:
+        pass
+    out = git_in(root, "branch", "-r", check=False)
+    branches = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("origin/") and " -> " not in line:
+            branches.add(line.removeprefix("origin/"))
+    return branches
+
+
+def is_merged(root, branch, into):
+    """Check if branch is an ancestor of (merged into) the target."""
+    try:
+        git_in(root, "merge-base", "--is-ancestor", branch, into)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+# --- Commands ---
+
+
+def cmd_new(args):
+    root = main_root()
+    mb = main_branch(root)
+    args, agent = pop_flag(args, "--agent", DEFAULT_AGENT)
+
+    if not args:
+        print(f"Usage: wt new <branch> [base] [--agent <cmd>]")
+        print(f"")
+        print(f"Creates a worktree with a new branch based on <base> (default: {mb}).")
+        print(f"The --agent flag sets the command for the top pane (default: {DEFAULT_AGENT}).")
+        sys.exit(1)
+
+    branch = args[0]
+    base = args[1] if len(args) > 1 else mb
+    path = wt_path(root, branch)
+
+    if os.path.exists(path):
+        print(f"Error: worktree directory already exists: {path}")
+        sys.exit(1)
+
+    print(f"Creating worktree:")
+    print(f"  branch: {branch}")
+    print(f"  base:   {base}")
+    print(f"  path:   {path}")
+    if agent != DEFAULT_AGENT:
+        print(f"  agent:  {agent}")
+    print()
+
+    git_in(root, "worktree", "add", "-b", branch, path, base, capture=False)
+
+    if os.environ.get("TMUX"):
+        setup_tmux_panes(path, branch, agent)
+    else:
+        print()
+        print(f"Ready. To start working:")
+        print(f"  cd {path}")
+
+
+def setup_tmux_panes(path, branch, agent=DEFAULT_AGENT):
+    """Open a tmux split window: agent (top) + shell (bottom, 30%)."""
+    name = branch.split("/", 1)[-1]
+    result = subprocess.run(
+        ["tmux", "new-window", "-n", name, "-c", path,
+         "-P", "-F", "#{pane_id}", agent],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    pane_id = result.stdout.strip()
+    subprocess.run(
+        ["tmux", "split-window", "-v", "-l", "30%", "-t", pane_id, "-c", path],
+        check=True,
+    )
+
+
+def cmd_open(args):
+    root = main_root()
+    args, agent = pop_flag(args, "--agent", DEFAULT_AGENT)
+
+    if not args:
+        print("Usage: wt open <branch> [--agent <cmd>]")
+        print()
+        print(f"Opens agent + shell in an existing worktree (default agent: {DEFAULT_AGENT}).")
+        sys.exit(1)
+
+    branch = args[0]
+    path = wt_path(root, branch)
+
+    worktrees = parse_worktrees(root)
+    wt_found = any(w["path"] == path for w in worktrees)
+
+    if not wt_found:
+        print(f"Error: no worktree found for branch: {branch}")
+        print(f"  Expected path: {path}")
+        print()
+        print("Use 'wt new' to create a new worktree.")
+        sys.exit(1)
+
+    if os.environ.get("TMUX"):
+        setup_tmux_panes(path, branch, agent)
+    else:
+        print(f"Not in tmux. To start working:")
+        print(f"  cd {path}")
+
+
+def cmd_list(args):
+    root = main_root()
+    repo = os.path.basename(root)
+    print(f"Worktrees for {repo}:")
+    print(flush=True)
+    git_in(root, "worktree", "list", capture=False)
+
+
+def cmd_push(args):
+    root = main_root()
+    mb = main_branch(root)
+
+    if args:
+        branch = args[0]
+    else:
+        branch = git("symbolic-ref", "--short", "HEAD")
+
+    if branch == mb:
+        print(f"Error: refusing to push {mb} from this script.")
+        sys.exit(1)
+
+    print(f"Pushing {branch} to origin...")
+    git_in(root, "push", "-u", "origin", branch, capture=False)
+
+
+def cmd_force_push(args):
+    root = main_root()
+    mb = main_branch(root)
+
+    if args:
+        branch = args[0]
+    else:
+        branch = git("symbolic-ref", "--short", "HEAD")
+
+    if branch == mb:
+        print(f"Error: refusing to force-push {mb}.")
+        sys.exit(1)
+
+    print(f"Force-pushing {branch} to origin...")
+    git_in(root, "push", "--force-with-lease", "-u", "origin", branch, capture=False)
+
+
+def cmd_rm(args):
+    root = main_root()
+    keep_branch = "--keep-branch" in args
+    force = "--force" in args
+    args = [a for a in args if a not in ("--keep-branch", "--force")]
+
+    if not args:
+        print("Usage: wt rm <branch> [--force]")
+        print()
+        print("Removes the worktree for <branch> and deletes the local branch.")
+        print("Refuses if the branch has an active tmux window (use --force to override).")
+        print("Use --keep-branch to keep the branch after removing the worktree.")
+        sys.exit(1)
+
+    branch = args[0]
+    path = wt_path(root, branch)
+
+    cwd = os.getcwd()
+    if cwd.startswith(path):
+        print("Error: you're inside this worktree. cd elsewhere first.")
+        sys.exit(1)
+
+    if has_tmux_window(branch) and not force:
+        name = branch.split("/", 1)[-1]
+        print(f"Error: tmux window '{name}' is active for branch {branch}.")
+        print("Close the window first, or use --force to override.")
+        sys.exit(1)
+
+    # Check if it's a registered worktree.
+    worktrees = parse_worktrees(root)
+    wt_found = any(w["path"] == path for w in worktrees)
+
+    if wt_found:
+        print(f"Removing worktree: {path}")
+        git_in(root, "worktree", "remove", path, capture=False)
+    elif os.path.isdir(path):
+        print(f"Warning: {path} exists but isn't a registered worktree.")
+        print("Skipping (remove it manually if needed).")
+    else:
+        print(f"No worktree found at: {path}")
+
+    if not keep_branch:
+        try:
+            git_in(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")
+            print(f"Deleting local branch: {branch}")
+            try:
+                git_in(root, "branch", "-d", branch, capture=False)
+            except subprocess.CalledProcessError:
+                print(f"  Branch {branch} is not fully merged. Use 'git branch -D {branch}' to force.")
+        except subprocess.CalledProcessError:
+            pass  # branch doesn't exist locally
+
+
+def cmd_clean(args):
+    commit = "--commit" in args
+    root = main_root()
+    mb = main_branch(root)
+
+    worktrees = parse_worktrees(root)
+    remotes = remote_branches(root)
+
+    # Worktree branches that are merged.
+    active_windows = tmux_window_names()
+    merged_wt = []  # list of (branch, path)
+    skipped_active = []  # list of (branch, path) — active tmux sessions
+    for wt in worktrees:
+        if wt["path"] == root:
+            continue
+        branch = wt.get("branch")
+        if not branch or branch == mb:
+            continue
+        if is_merged(root, branch, mb):
+            name = branch.split("/", 1)[-1]
+            if name in active_windows:
+                skipped_active.append((branch, wt["path"]))
+            else:
+                merged_wt.append((branch, wt["path"]))
+
+    # Merged feature branches that have no worktree.
+    wt_branch_set = {b for b, _ in merged_wt} | {b for b, _ in skipped_active}
+    # Also include non-merged worktree branches so we don't list them as orphans.
+    for wt in worktrees:
+        b = wt.get("branch")
+        if b:
+            wt_branch_set.add(b)
+
+    orphan_branches = []
+    merged_out = git_in(root, "branch", "--merged", mb, check=False)
+    for line in merged_out.splitlines():
+        branch = line.strip().lstrip("*+ ")
+        if not branch or branch == mb:
+            continue
+        if branch not in wt_branch_set:
+            orphan_branches.append(branch)
+
+    if skipped_active:
+        print("Skipped (active tmux session):")
+        print()
+        for branch, path in skipped_active:
+            name = branch.split("/", 1)[-1]
+            print(f"  {path}  [{branch}] (window: {name})")
+        print()
+
+    if not merged_wt and not orphan_branches:
+        print("Nothing to clean up.")
+        return
+
+    if merged_wt:
+        print("Merged worktrees to remove:")
+        print()
+        for branch, path in merged_wt:
+            remote = " (+ origin)" if branch in remotes else ""
+            print(f"  {path}  [{branch}]{remote}")
+        print()
+
+    if orphan_branches:
+        print("Merged branches without worktrees:")
+        print()
+        for branch in orphan_branches:
+            remote = " (+ origin)" if branch in remotes else ""
+            print(f"  {branch}{remote}")
+        print()
+
+    if not commit:
+        print("Run with --commit to delete.")
+        return
+
+    for branch, path in merged_wt:
+        print(f"  removing worktree {path}")
+        git_in(root, "worktree", "remove", path, capture=False)
+        print(f"  deleting branch {branch}")
+        git_in(root, "branch", "-d", branch, capture=False)
+        if branch in remotes:
+            print(f"  deleting origin/{branch}")
+            git_in(root, "push", "origin", f":{branch}", check=False, capture=False)
+
+    for branch in orphan_branches:
+        print(f"  deleting branch {branch}")
+        git_in(root, "branch", "-d", branch, capture=False)
+        if branch in remotes:
+            print(f"  deleting origin/{branch}")
+            git_in(root, "push", "origin", f":{branch}", check=False, capture=False)
+
+    total = len(merged_wt) + len(orphan_branches)
+    print()
+    if total == 1:
+        print("Done. Cleaned up 1 branch.")
+    else:
+        print(f"Done. Cleaned up {total} branches.")
+
+
+def parse_dispatch_doc(path):
+    """Parse a dispatch doc's YAML frontmatter and first heading."""
+    with open(path) as f:
+        content = f.read()
+    info = {}
+    # Parse YAML frontmatter (between --- delimiters)
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            frontmatter = content[4:end]
+            info = yaml.safe_load(frontmatter) or {}
+    # Extract title from first markdown heading
+    for line in content.split("\n"):
+        if line.startswith("# "):
+            info["title"] = line[2:].strip()
+            break
+    return info
+
+
+def cmd_launch(args):
+    root = main_root()
+    mb = main_branch(root)
+    args, agent = pop_flag(args, "--agent", DEFAULT_AGENT)
+    dry_run = "--dry-run" in args
+    args = [a for a in args if a != "--dry-run"]
+
+    if not args:
+        print("Usage: wt launch <dispatch-doc>... [--agent <cmd>] [--dry-run]")
+        print()
+        print("Creates worktrees from dispatch docs and launches agents.")
+        print("Parses 'branch' from each doc's YAML frontmatter.")
+        print("Skips docs where executor is 'human'.")
+        print()
+        print("Example:")
+        print("  wt launch docs/planning/dispatch/003-00*")
+        sys.exit(1)
+
+    # Resolve paths relative to cwd
+    docs = []
+    for arg in args:
+        path = os.path.abspath(arg)
+        if not os.path.isfile(path):
+            print(f"Warning: not a file, skipping: {arg}")
+            continue
+        info = parse_dispatch_doc(path)
+        if not info.get("branch"):
+            print(f"Warning: no 'branch' found in {arg}, skipping.")
+            continue
+        # Compute the relative path from repo root for the agent prompt
+        try:
+            info["relpath"] = os.path.relpath(path, root)
+        except ValueError:
+            info["relpath"] = path
+        info["path"] = path
+        docs.append(info)
+
+    if not docs:
+        print("No valid dispatch docs found.")
+        sys.exit(1)
+
+    # Filter out human-only threads
+    launchable = []
+    skipped = []
+    for doc in docs:
+        executor = doc.get("executor", "").lower()
+        if executor == "human":
+            skipped.append(doc)
+        else:
+            launchable.append(doc)
+
+    if skipped:
+        print("Skipping (human-only):")
+        for doc in skipped:
+            print(f"  {doc.get('title', doc['relpath'])}")
+        print()
+
+    if not launchable:
+        print("No agent-launchable threads found.")
+        sys.exit(0)
+
+    print(f"Launching {len(launchable)} thread(s):")
+    print()
+    for doc in launchable:
+        title = doc.get("title", doc["branch"])
+        executor = doc.get("executor", "unknown")
+        print(f"  {doc['branch']}")
+        print(f"    {title}")
+        print(f"    executor: {executor}")
+    print()
+
+    if dry_run:
+        print("Dry run — no worktrees created.")
+        return
+
+    if not os.environ.get("TMUX"):
+        print("Error: launch requires tmux (not in a tmux session).")
+        sys.exit(1)
+
+    for doc in launchable:
+        branch = doc["branch"]
+        path = wt_path(root, branch)
+        relpath = doc["relpath"]
+
+        # Create worktree if it doesn't exist
+        if os.path.exists(path):
+            print(f"Worktree exists: {path}")
+        else:
+            print(f"Creating worktree: {branch} → {path}")
+            git_in(root, "worktree", "add", "-b", branch, path, mb, capture=False)
+
+        # Build agent command with initial prompt
+        prompt = (
+            f"Read and execute the dispatch document at {relpath} — "
+            f"it contains your task breakdown, deliverables, and validation commands. "
+            f"Work through the tasks in order. After completing all tasks, "
+            f"run the automated validation commands from the doc to verify your work."
+        )
+        agent_cmd = f"{agent} {shlex.quote(prompt)}"
+        setup_tmux_panes(path, branch, agent_cmd)
+        print(f"Launched: {branch}")
+        print()
+
+
+def cmd_help():
+    root = main_root()
+    mb = main_branch(root)
+    parent = os.path.dirname(root)
+    repo = os.path.basename(root)
+
+    print("Usage: wt <command> [args]")
+    print()
+    print("Manages git worktrees as sibling directories.")
+    print()
+    print("Commands:")
+    print(f"  new <branch> [base] [--agent <cmd>]")
+    print(f"      Create worktree with new branch (default base: {mb})")
+    print(f"  open <branch> [--agent <cmd>]")
+    print(f"      Open agent + shell in an existing worktree")
+    print( "  launch <dispatch-doc>... [--agent <cmd>] [--dry-run]")
+    print( "      Create worktrees from dispatch docs and launch agents")
+    print( "  list                   List all worktrees")
+    print( "  push [branch]          Push branch to origin with -u (default: current branch)")
+    print( "  force-push [branch]   Force-push branch to origin (uses --force-with-lease)")
+    print( "  rm <branch> [--force]  Remove worktree and delete local branch")
+    print( "  clean [--commit]       Remove merged worktrees (skips active tmux sessions)")
+    print()
+    print(f"The --agent flag sets the command for the top tmux pane (default: {DEFAULT_AGENT}).")
+    print()
+    print("Worktrees are placed at:")
+    print(f"  {parent}/{repo}--<branch-slug>")
+    print()
+    print("Examples:")
+    print(f"  wt new feature/monitor              Create worktree from {mb}")
+    print(f"  wt new fix/search-backup HEAD           Create worktree from current HEAD")
+    print( "  wt new feature/foo --agent aider      Use aider instead of claude")
+    print( "  wt open feature/monitor              Reopen claude + shell in existing worktree")
+    print( "  wt open feature/monitor --agent bash  Open with just a shell (no agent)")
+    print( "  wt launch docs/planning/dispatch/003-00*  Launch all wave 003 threads")
+    print( "  wt launch docs/planning/dispatch/003-00* --dry-run  Preview without creating")
+    print( "  wt push                               Push current branch to origin")
+    print( "  wt force-push                         Force-push after rebase")
+    print( "  wt rm feature/monitor                Remove worktree + branch")
+    print( "  wt clean                              Dry-run: show merged worktrees")
+    print( "  wt clean --commit                     Actually remove merged worktrees")
+
+
+if __name__ == "__main__":
+    argv = sys.argv[1:]
+    cmd = argv[0] if argv else ""
+    rest = argv[1:]
+
+    commands = {
+        "new": cmd_new,
+        "open": cmd_open,
+        "launch": cmd_launch,
+        "list": cmd_list,
+        "ls": cmd_list,
+        "push": cmd_push,
+        "force-push": cmd_force_push,
+        "rm": cmd_rm,
+        "clean": cmd_clean,
+    }
+
+    if cmd in commands:
+        commands[cmd](rest)
+    elif cmd in ("help", "--help", "-h", ""):
+        cmd_help()
+    else:
+        print(f"Unknown command: {cmd}")
+        print()
+        cmd_help()
+        sys.exit(1)
