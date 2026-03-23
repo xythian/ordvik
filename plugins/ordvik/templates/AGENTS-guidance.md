@@ -1,3 +1,13 @@
+## Planning & Backlog
+
+This repo uses ordvik for planning. Key files live in `docs/planning/`:
+
+- **Backlog**: `docs/planning/backlog.md` — prioritized work items (P0–P2 + Done)
+- **Threads**: `docs/planning/threads.md` — active work threads with status
+- **Dispatch docs**: `docs/planning/dispatch/` — agent-executable work packages
+
+When the user says "add to backlog", "backlog this", or similar — they mean append an item to `docs/planning/backlog.md`, not save a memory or note. Read the file first to match the existing format and priority section.
+
 ## Codebase Exploration
 
 When searching or exploring the codebase, prefer built-in tools over shell commands:

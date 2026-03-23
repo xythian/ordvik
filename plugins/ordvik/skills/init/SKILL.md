@@ -35,6 +35,7 @@ Check for each of these and report what already exists:
 - `.ordvik.yml` — scope registry and config
 - `docs/rfcs/` — RFC directory
 - `docs/rfcs/conventions.md` — project-local RFC conventions
+- `docs/research/` — research documents
 - `docs/planning/` — planning structure
 - `docs/planning/threads.md` — thread registry
 - `docs/planning/backlog.md` — backlog
@@ -86,6 +87,7 @@ scopes:
   root:
     rfcs: docs/rfcs/
     designs: docs/designs/
+    research: docs/research/
 ```
 
 **Multi-scope template:**
@@ -99,6 +101,7 @@ scopes:
   root:
     rfcs: docs/rfcs/
     designs: docs/designs/
+    research: docs/research/
     description: Cross-cutting concerns and shared infrastructure
   # One entry per subproject, filled from Step 3
 ```
@@ -109,6 +112,7 @@ For each item below, create only if it doesn't already exist:
 
 **Always created:**
 - `docs/rfcs/` directory
+- `docs/research/` directory
 
 **Planning layer** — ask: "Do you want to set up the planning structure (threads, backlog, dispatch docs)?" Default yes.
 - `docs/planning/` directory
@@ -119,6 +123,7 @@ For each item below, create only if it doesn't already exist:
 **Multi-scope only:**
 - `<scope>/docs/rfcs/` for each declared scope
 - `<scope>/docs/designs/` for each declared scope (if the directory's parent exists)
+- `<scope>/docs/research/` for each declared scope (if the directory's parent exists)
 
 ### Step 6: Create Convention Files
 

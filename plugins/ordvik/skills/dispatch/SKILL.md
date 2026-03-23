@@ -23,7 +23,7 @@ This skill is part of the **planning layer** — it activates when `docs/plannin
 For dispatch-specific conventions, resolve in this order:
 
 1. **Project-local**: `docs/planning/conventions.md`
-2. **Plugin default**: Built-in conventions in this skill (below)
+2. **Plugin default**: `${CLAUDE_SKILL_DIR}/references/conventions.md`
 
 The dispatch format specification (YAML frontmatter, task structure, human gates) is canonical in this skill — it's part of the planning model, not project-specific configuration.
 
@@ -56,8 +56,10 @@ The user invokes this skill as `/ordvik:dispatch <operation> [args...]`.
 | Operation | Arguments |
 |-----------|-----------|
 | `create`  | `<slug> [--thread N] [--wave N] [--source <ref>]` |
-| `list`    | `[--wave N]` |
+| `list`    | `[--wave N] [--archived] [--status <s>]` |
 | `review`  | `<file>` |
+| `close`   | `<file> [--superseded-by <ref>]` |
+| `mark-done` | `<file> <task-number>` |
 
 If invoked with no arguments, show help. If the user asks conversationally to "write a dispatch doc" or "create tasks for X", treat as `create`.
 
@@ -86,6 +88,7 @@ branch: thread/<slug>
 executor: agent
 scope: search                    # multi-scope repos: which project this targets
 source: RFC search/0069
+status: active                 # active (default) | done | superseded
 depends_on: []
 human_gates:
   - "Task 7: Deploy and verify one service end-to-end"
@@ -102,6 +105,7 @@ Field reference:
 | `executor` | yes | `agent`, `human`, or `mixed` — launch scripts skip `human` threads |
 | `scope` | no | Target scope name from `.ordvik.yml` (multi-scope repos only). Omit for single-scope repos or root-scope work. |
 | `source` | yes | Where this work comes from. Use scope-prefixed RFC refs in multi-scope repos (e.g., `RFC search/0069`). |
+| `status` | no | Lifecycle state: `active` (default, can be omitted), `done`, or `superseded`. See conventions doc for lifecycle rules. |
 | `depends_on` | no | Thread numbers that must complete first |
 | `human_gates` | no | List of task descriptions that require human execution |
 | `platform` | no | `darwin`, `linux`, or `any` (default: `any`) — platform constraint |
@@ -185,7 +189,7 @@ Background information the agent needs. Include:
 
 **Automated validation**:
 ```bash
-./scripts/test.sh ./relevant/package/...
+./scripts/test.sh full
 ./scripts/build.sh relevant-binary
 ```
 
@@ -198,6 +202,57 @@ Background information the agent needs. Include:
 > **Human gate**: Description of why this requires human execution.
 
 Steps the human needs to perform, with commands and checklists.
+
+---
+
+## Task N (Contract): Title
+
+**Scope**: What tests/acceptance criteria this task defines.
+
+**Deliverables**:
+- Test files to create (these become immutable for subsequent tasks)
+- Acceptance criteria document if applicable
+
+**Automated validation**:
+```bash
+# Tests should compile but fail (no implementation yet) — that's expected
+./scripts/test.sh full
+```
+
+---
+
+## Task N: Title
+
+**Contract**: Task M — tests in `path/to/tests` are immutable.
+Do not modify test files. Make them pass.
+
+**Scope**: What this task accomplishes (one paragraph).
+
+**Deliverables**:
+- Specific files to create or modify (NOT including contract test files)
+
+**Automated validation**:
+```bash
+./scripts/test.sh full
+```
+
+---
+
+## Task N (Audit): Title
+
+**Scope**: What this task verifies — stated from scratch, not referencing
+earlier task outcomes.
+
+**Expected state**:
+- File `path/to/file.go` exists and exports `FunctionName(args) returnType`
+- Running `curl localhost:8080/health` returns 200
+- Table `widgets` has columns: id, name, created_at
+
+**Automated validation**:
+```bash
+./scripts/test.sh full
+# Additional targeted verification commands
+```
 
 ---
 
@@ -267,12 +322,18 @@ Shared testing strategy across all tasks (unit, integration, regression).
    - Include automated validation commands
    - Take no more than ~1 hour of agent time
    - Build on previous tasks in the sequence
+   - Limit threads to 5–7 implementation tasks. If decomposition yields more, split into multiple threads with an explicit dependency chain. Long threads accumulate context that biases the agent toward confirming its own earlier work.
 
 6. **Prompt for verification completeness** — For each task, consider:
    - "How would you know this task is *actually* done, not just 'tests pass'?"
    - "What could go wrong that unit tests wouldn't catch?"
    - "Is there an end-to-end check that would validate the full data flow?"
+   - "Is the accumulated context going to bias late-thread verification? Should this have an audit task?"
    - Flag tasks that have only unit-level validation for code that touches multiple subsystems.
+
+   **Decision rules:**
+   - If the thread has 4+ implementation tasks, add an `(Audit)` task as the final task before the Pre-PR Checklist.
+   - If the work has clearly specifiable acceptance criteria (APIs, data flows, behavioral contracts), consider leading with a `(Contract)` task that writes tests before implementation begins.
 
 7. **Identify human gates** — Mark tasks that require human execution:
    - Deployment to production
@@ -284,12 +345,47 @@ Shared testing strategy across all tasks (unit, integration, regression).
 
 9. **Report** — Show the user: file path, thread/wave numbers, scope (if multi-scope), task count, and any human gates.
 
-### `list [--wave N]`
+### `list [--wave N] [--archived] [--status <s>]`
 
-1. Glob `docs/planning/dispatch/*.md` (exclude wave retros and human-week docs).
-2. Parse YAML frontmatter from each file.
-3. Output a table: **File**, **Thread**, **Wave**, **Executor**, **Source**, **Branch**.
+1. Glob `docs/planning/dispatch/*.md` (exclude wave retros and human-week docs). By default, exclude `archive/` subdirectory.
+2. If `--archived` is given, also glob `docs/planning/dispatch/archive/*.md` and include those results.
+3. Parse YAML frontmatter from each file. Treat missing `status` as `active`.
 4. If `--wave` is given, filter to that wave only.
+5. If `--status` is given, filter to that status only (e.g., `--status done`).
+6. Output a table: **File**, **Thread**, **Wave**, **Status**, **Executor**, **Source**, **Branch**.
+
+### `close <file> [--superseded-by <ref>]`
+
+Closes a dispatch thread by updating its status and archiving. Read `${CLAUDE_SKILL_DIR}/references/conventions.md` for full lifecycle rules.
+
+1. **Read** the dispatch document.
+
+2. **If `--superseded-by` is given** (supersession close):
+   - Set `status: superseded` in frontmatter
+   - Add `superseded_by: "<ref>"` field to frontmatter
+   - Insert a blockquote after the title heading: `> **Superseded** by [<ref>](./<ref>.md). This document is retained for historical context.`
+   - Archive immediately — move to `docs/planning/dispatch/archive/`
+   - Report what was done
+
+3. **If closing as done** (normal close):
+   - Validate all tasks have the `— DONE` marker. If any are missing, report which tasks are not marked done and ask the user to confirm or mark them.
+   - Validate all completion criteria checkboxes are checked (`[x]`). Report any unchecked items.
+   - Set `status: done` in frontmatter
+   - Determine archive timing:
+     - If the thread belongs to a wave: archive after wave retro (tell the user the doc will be archived during `wave-close`)
+     - If standalone (no wave): archive immediately to `docs/planning/dispatch/archive/`
+   - Check if the wave is now complete (all threads `done` or `superseded`). If so, prompt the user to run `/ordvik:planning wave-close <N>`.
+   - Ask the user about backlog follow-ons — are there new items to add from this work?
+
+### `mark-done <file> <task-number>`
+
+Convenience operation to standardize the task completion marker.
+
+1. Read the dispatch document.
+2. Find the task heading matching the given number (e.g., `## Task 3: ...`).
+3. If the heading already has `— DONE`, report that it's already marked and do nothing.
+4. Append ` — DONE` to the heading text.
+5. Write the updated file.
 
 ### `review <file>`
 
@@ -297,6 +393,9 @@ Shared testing strategy across all tasks (unit, integration, regression).
 2. Check against this checklist:
    - [ ] YAML frontmatter present with required fields (`thread`, `branch`, `executor`, `source`)
    - [ ] `branch` field is set (required for launch scripts)
+   - [ ] `status` field, if present, is one of: `active`, `done`, `superseded`
+   - [ ] If `status: superseded`: `superseded_by` field is present and the superseding doc exists
+   - [ ] If `status: done`: all task headings have `— DONE` marker
    - [ ] In multi-scope repos: `scope` field is present and matches a declared scope in `.ordvik.yml`
    - [ ] `source` uses scope-prefixed RFC references when applicable (e.g., `RFC search/0069`)
    - [ ] Goal statement is clear and specific
@@ -308,6 +407,10 @@ Shared testing strategy across all tasks (unit, integration, regression).
    - [ ] Constraints section sets clear boundaries
    - [ ] Completion criteria are measurable
    - [ ] Verification tiers are appropriate — tasks touching multiple subsystems have more than unit-level validation
+   - [ ] Threads with 4+ implementation tasks include at least one `(Audit)` task
+   - [ ] Audit task bodies are self-contained — no references to "Task N created/did X"
+   - [ ] If `(Contract)` tasks exist: bound implementation tasks include a **Contract** field
+   - [ ] If `(Contract)` tasks exist: contract deliverable files are not listed as modifiable in implementation task deliverables
    - [ ] If `repo` is present: `path` and `url` are set, `add_dirs` includes the planning hub, Context section notes the cross-repo setup
 3. Report findings and suggest fixes.
 
@@ -323,11 +426,13 @@ Good tasks are **specific enough that an agent can execute without asking clarif
 - Reference specific types, functions, or interfaces by name
 - Set explicit scope boundaries ("do NOT modify X")
 - Use project build/test scripts, not bare language-specific commands
+- Always specify the full test suite (`./scripts/test.sh full`), never a subset or fast tier — abbreviated test runs hide regressions
 
 **Don't**:
 - Write vague deliverables ("improve the code", "add tests")
 - Assume the agent knows which files to modify
 - Skip automated validation — every task needs a way to verify it worked
+- Use abbreviated or fast test tiers for task validation — those are for interactive development, not declaring work complete
 - Combine unrelated changes in one task
 - Include tasks that depend on external systems the agent can't access (mark those as human gates)
 
@@ -339,7 +444,63 @@ Each task's validation section should distinguish when appropriate:
 - **Integration (agent-run if infra available):** Commands that require infrastructure — VM-based tests, database tests, network tests. Specify what infrastructure is needed.
 - **Operational (human-run):** Checks that require deployment or access the agent doesn't have — dashboard verification, production log checks, user-facing behavior
 
-The pre-PR checklist always requires the full test tier plus relevant integration tests — never the fast tier alone. The fast tier is for iterative development feedback; the full tier is for declaring work complete.
+The pre-PR checklist always requires the full test suite plus relevant integration tests — never an abbreviated or fast tier alone. The fast tier is for iterative development feedback; the full suite is for declaring work complete. Every automated validation command in every task must run the full test suite, not a subset.
+
+## Task Patterns
+
+Beyond standard implementation tasks and human gates, dispatch docs support two additional task patterns that address context poisoning — the tendency for agents to confirm their own earlier work rather than verify it independently.
+
+### Audit Tasks
+
+An audit task verifies prior work with **fresh context**. It is designed to be executed by a separate agent session that has NOT accumulated the executing agent's "I did this" context.
+
+Mark audit tasks in the heading:
+
+    ## Task 5 (Audit): Verify data pipeline end-to-end
+
+**Rules:**
+
+- The task body must be **self-contained**: re-state what should exist, what behavior to verify, and which files to inspect. Do not write "verify Task 2's deliverables" — instead list the specific files, functions, and behaviors.
+- Include an **Expected state** field listing concrete, checkable assertions about the state of the codebase.
+- Automated validation commands are mandatory. The auditor runs them from scratch.
+- Audit tasks must NOT reference earlier task outcomes ("Task 2 created X"). State the expected state of the world as fact: "The file X should exist and export function Y with signature Z."
+- Place audit tasks after the implementation tasks they verify, typically as the last task before the Pre-PR Checklist.
+- For threads with 4+ implementation tasks, include at least one audit task.
+
+Launch scripts and human operators should treat `(Audit)` tasks the same as `(Human Gate)` in one respect: they benefit from a fresh agent session. Future launch script versions may enforce this automatically.
+
+### Validation Contracts
+
+A validation contract is a task that writes tests or acceptance criteria BEFORE the implementation tasks that must satisfy them. The tests become an immutable oracle — implementation must make them pass, not modify them.
+
+Mark the contract task:
+
+    ## Task 1 (Contract): Define acceptance tests for widget rendering
+
+Mark implementation tasks that are bound by the contract:
+
+    ## Task 2: Implement widget renderer
+
+    **Contract**: Task 1 — tests in `src/widget/widget_test.go` are immutable.
+    Do not modify test files. Make them pass.
+
+**Rules:**
+
+- The contract task writes test files and records their paths in its Deliverables.
+- Contract tests should run the full test suite, not a subset. Tests must compile but are expected to fail initially (no implementation yet).
+- Implementation tasks list the contract they are bound by in a **Contract** field (after Scope, before Deliverables).
+- Agents executing implementation tasks must NOT modify files listed in the contract's Deliverables unless the contract explicitly permits specific changes (e.g., "test helpers in `testutil/` may be extended but not altered").
+- If an implementation task cannot pass a contract test, it must document the gap in the Pre-existing issues section rather than silently editing the test.
+- Contract tests should include both unit-level and behavioral/integration-level checks to prevent narrow implementations that technically pass but miss intent.
+
+### When to Use Each Pattern
+
+| Signal | Pattern |
+|--------|---------|
+| Thread has 4+ implementation tasks | Add an `(Audit)` task |
+| Work has clearly specifiable acceptance criteria (APIs, data flows, behavioral contracts) | Lead with a `(Contract)` task |
+| Thread modifies multiple subsystems that interact | Both — contract for the interface, audit for integration |
+| Simple 2–3 task thread with good automated tests | Neither — standard tasks are fine |
 
 ## Inline Markers
 

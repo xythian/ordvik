@@ -20,11 +20,20 @@ allowed_tools:
 
 Conducts structured research and records it as a durable artifact. Research documents capture investigation, evaluation, and analysis — they inform decisions but don't propose work the way RFCs do.
 
+## Research Directory Resolution
+
+**On every invocation**, resolve the research directory:
+
+1. Check for `.ordvik.yml` at the repo root. If it exists and the target scope declares a `research:` path, use that.
+2. Otherwise, fall back to `docs/research/` (single-scope / root) or `<scope>/docs/research/` (multi-scope project scope).
+
+The `--scope` flag selects which scope to use. If omitted, use root scope. If the resolved directory doesn't exist, create it.
+
 ## Output Modes
 
 Research can land in two places, depending on context:
 
-1. **Standalone document** — `docs/research/<slug>.md` (or `<scope>/docs/research/` in multi-scope repos). Use when the research is broadly useful, covers a topic area, or may feed into multiple future RFCs.
+1. **Standalone document** — `<research-dir>/<slug>.md` (resolved per above). Use when the research is broadly useful, covers a topic area, or may feed into multiple future RFCs.
 
 2. **RFC appendix** — `## Appendix N: Research — <Topic>` appended to an existing RFC. Use when the research was conducted in service of a specific RFC and is most useful as context alongside the proposal. This is a judgment call made during the session.
 
@@ -74,7 +83,7 @@ Use appropriate tools based on the topic:
 
 ### Step 3: Write the Document
 
-File location: `docs/research/<topic-slug>.md` (or `<scope>/docs/research/` in multi-scope repos). Create the directory if it doesn't exist.
+File location: `<research-dir>/<topic-slug>.md` (resolved from `.ordvik.yml`; default `docs/research/`). Create the directory if it doesn't exist.
 
 Filename: descriptive slug, no numeric prefix. Examples:
 - `nats-jetstream-evaluation.md`
@@ -177,9 +186,9 @@ The temporary `## Research Notes` section from Phase 2 is the staging area. At f
 
 ## Scope in Multi-Scope Repos
 
-In multi-scope repos, research documents follow the same scoping as RFCs:
+In multi-scope repos, research documents follow the same scoping as RFCs. The `research:` path for each scope is declared in `.ordvik.yml`:
 
-- Root scope: `docs/research/` — cross-cutting research
-- Project scope: `<scope>/docs/research/` — project-specific research
+- Root scope: `scopes.root.research` (default `docs/research/`) — cross-cutting research
+- Project scope: `scopes.<name>.research` (default `<scope>/docs/research/`) — project-specific research
 
 Use `--scope` to specify, or infer from context. Cross-cutting technology evaluations go in root scope. Project-specific investigations go in the project scope.

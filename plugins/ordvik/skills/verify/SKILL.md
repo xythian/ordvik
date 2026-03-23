@@ -41,21 +41,30 @@ For a single dispatch doc:
    - Is the task marked as done?
    - Do the deliverables exist? (check file paths, function names, types mentioned)
    - Run the automated validation commands from the task
+   - If the task is marked `(Audit)`: verify its automated validation commands pass. Flag if the audit task body references earlier task numbers by outcome (pattern: "Task N created/implemented/added") — this indicates it was not self-contained.
+   - If the task is marked `(Contract)`: record the deliverable file paths as the "contract files" for step 3.
+   - For non-contract tasks that list a **Contract** field: verify that the contract files have NOT been modified since the contract task's commit. Use `git log --oneline -- <contract-file>` to check if the file was touched after the contract task was marked done.
 
-3. **Run the pre-PR checklist**:
+3. **Contract integrity check** — if the thread contains `(Contract)` tasks:
+   - Identify contract deliverable files from the contract task's Deliverables section.
+   - Check `git log` for modifications to those files after the contract task commit.
+   - If modified: FAIL with "Contract violation — test files were modified during implementation."
+   - Run the contract test files independently to confirm they pass with the full test suite.
+
+4. **Run the pre-PR checklist**:
    - [ ] Full test suite: `./scripts/test.sh full` (not the fast tier)
    - [ ] Relevant integration tests: check `./scripts/test.sh list` for applicable suites
    - [ ] Full build: `./scripts/build.sh`
    - [ ] All completion criteria verified
    - [ ] No stale references to removed/renamed code
 
-4. **Stale reference check** — scan for:
+5. **Stale reference check** — scan for:
    - Comments referencing deleted/renamed code
    - Variable names that reference old concepts
    - Doc strings that describe removed behavior
    - Import statements for deleted packages
 
-5. **Generate findings report**:
+6. **Generate findings report**:
 
 ```markdown
 # Verification: [Thread Title]
@@ -68,8 +77,10 @@ For a single dispatch doc:
 
 | Task | Deliverables | Validation | Status |
 |------|-------------|------------|--------|
-| 1: ... | ✓ all present | ✓ tests pass | PASS |
-| 2: ... | ✓ all present | ✗ build warning | NOTE |
+| 1: ... (Contract) | ✓ tests written | ✓ files unmodified | PASS |
+| 2: ... | ✓ all present | ✓ contract tests pass | PASS |
+| 3: ... | ✓ all present | ✗ build warning | NOTE |
+| 4: ... (Audit) | ✓ self-contained | ✓ validation passes | PASS |
 
 ## Pre-PR Checklist
 
@@ -107,6 +118,7 @@ For a wave (`--wave N`):
    - **Config patterns** — do config structs, default values, and parameter functions follow the same patterns across threads?
    - **Error handling** — consistent error wrapping, logging levels, and error types?
    - **Test patterns** — similar test structure and assertion patterns across threads?
+   - **Audit coverage** — do threads with 4+ implementation tasks include audit tasks? Flag threads that lack them.
 
 4. **Data flow tracing** — for threads that touch related subsystems:
    - Trace data flows end-to-end across changed code paths

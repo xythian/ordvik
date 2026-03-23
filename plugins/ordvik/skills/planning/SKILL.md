@@ -150,10 +150,18 @@ Always tell the user what document changes you made.
 `/ordvik:planning wave-close <N>`
 
 1. Read all dispatch docs for wave N
-2. Check completion status of each thread (merged PRs, branch state)
-3. Update backlog — mark completed items with date, note follow-ups
-4. Update thread registry if thread statuses changed
-5. Write wave checkpoint: `docs/planning/dispatch/wave-NNN-retro.md`
+2. **Close each thread** — For each dispatch doc in the wave, run the dispatch close-out process:
+   - Verify all tasks are marked `— DONE`
+   - Verify completion criteria are checked
+   - Set `status: done` in frontmatter (or `superseded` if applicable)
+   - See `/ordvik:dispatch close` for the full thread-level checklist
+3. Check completion status of each thread (merged PRs, branch state)
+4. Update backlog — mark completed items with date, note follow-ups
+5. Update thread registry if thread statuses changed
+6. Write wave checkpoint: `docs/planning/dispatch/wave-NNN-retro.md`
+7. **Archive all wave docs** — Move all wave dispatch docs and the retro to `docs/planning/dispatch/archive/`. Files keep their original names. This clears the dispatch folder of completed work.
+
+Note: Dispatch conventions for status lifecycle and archive rules are defined in the dispatch skill's conventions doc (`references/conventions.md` within the dispatch skill). Wave close-out orchestrates thread close-outs as a sub-step — thread-level format concerns (status fields, DONE markers, supersession) are owned by the dispatch skill.
 
 Retro format:
 
@@ -187,11 +195,12 @@ Retro format:
 
 1. Assess current state — what changed since the last plan?
 2. Review in-progress dispatch docs for scope changes
-3. Identify blocked or delayed threads
-4. Update dispatch docs (add tasks, mark descoped items with reason)
-5. Update backlog priorities
-6. Adjust wave boundaries if needed
-7. Record the decision — every replan must be traceable
+3. **Check for stale dispatch status** — Identify dispatch docs with `status: active` (or missing status) where work is clearly done or superseded. Flag these for close-out.
+4. Identify blocked or delayed threads
+5. Update dispatch docs (add tasks, mark descoped items with reason)
+6. Update backlog priorities
+7. Adjust wave boundaries if needed
+8. Record the decision — every replan must be traceable
 
 ## Dispatch-Ready Review
 
