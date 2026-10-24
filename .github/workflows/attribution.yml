@@ -1,0 +1,29 @@
+# Ken is the author of every change: no commit in a pull request may be
+# authored as Claude or carry Claude trailers, and the PR body carries no
+# "Generated with Claude Code" footer (scripts/check-attribution). Runs on
+# body edits too.
+name: attribution
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  attribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Commits
+        run: scripts/check-attribution commits "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+
+      - name: Pull request body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n' "$BODY" | scripts/check-attribution body

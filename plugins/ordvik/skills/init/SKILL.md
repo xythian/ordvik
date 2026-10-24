@@ -158,6 +158,7 @@ Ask: "Do you want to add agent guidance to CLAUDE.md (or AGENTS.md)?"
 
 If yes, read `${CLAUDE_PLUGIN_ROOT}/templates/AGENTS-guidance.md` and append it to the repo's `CLAUDE.md` or `AGENTS.md` (whichever exists; prefer `CLAUDE.md`; create `CLAUDE.md` if neither exists). This guidance covers:
 
+- **Development process** — a summary of `/ordvik:process` and a pointer to it. Afterwards, tell the user to add the repo's own bindings next to it: default branch, test commands, and which hosts serve as each venue in the process's "Where work runs" table.
 - **Codebase exploration** — use built-in tools (Glob, Grep, Read, Edit, Write) instead of shell commands. This avoids per-command approval prompts and produces better results.
 - **Subagent communication** — return results as text, don't write temp files.
 - **Build & test** — use project scripts, not bare language commands.
@@ -171,6 +172,10 @@ Ask: "Do you want to install the `wt` worktree manager script?"
 If yes, copy `${CLAUDE_PLUGIN_ROOT}/scripts/wt` to `scripts/wt` in the repo and make it executable. The `wt` script manages git worktrees for parallel agent sessions — creating worktrees from dispatch docs, launching agents in tmux panes, and cleaning up merged branches.
 
 Skip if `scripts/wt` already exists. Note the `pyyaml` dependency (needed for parsing dispatch doc frontmatter).
+
+In the same step, offer `scripts/plan` (copy `${CLAUDE_PLUGIN_ROOT}/scripts/plan`, make it executable): it reads a dispatch plan in `docs/planning/plans/` and says which dispatch docs can launch now. Also offer `scripts/asks` (same way; it imports `scripts/plan`): it lists everything waiting on the operator (see `/ordvik:asks`). With it, create `docs/planning/asks/` and `docs/planning/asks/archive/` (with a `.gitkeep`). Skip any that already exist.
+
+If the repo has RFCs and is on GitHub, also offer RFC number reservation: copy `${CLAUDE_PLUGIN_ROOT}/scripts/rfc` to `scripts/rfc` (executable) and `${CLAUDE_PLUGIN_ROOT}/templates/workflows/rfc-reservation.yml` to `.github/workflows/rfc-reservation.yml`, and suggest adding `python3 scripts/rfc check` to the test suite. Set the workflow's `workflow_run.workflows` to the names of every workflow behind a required status check (the template says `ci`): it tries the merge as each finishes, and the last one's run succeeds. It merges with a token from a dedicated GitHub App, so a ruleset that restricts updates or requires approval can let only that App through. Walk the user through: create a private GitHub App with Contents and Pull requests read and write and no webhook, install it on this repo only, add it to the default branch ruleset's bypass list ("For pull requests only"), and create an environment `rfc-reservation` limited to the default branch holding variable `RFC_APP_ID` and secret `RFC_APP_PRIVATE_KEY`. Skip each file that already exists.
 
 ### Step 9: Report and Suggest Next Steps
 
@@ -191,13 +196,17 @@ Template files are in `${CLAUDE_PLUGIN_ROOT}/templates/`:
 |----------|-------------|-------------|
 | `threads.md` | `docs/planning/threads.md` | Thread registry with status definitions |
 | `backlog.md` | `docs/planning/backlog.md` | Prioritized backlog (P0-P2 + Done) |
-| `AGENTS-guidance.md` | Appended to `CLAUDE.md` | Codebase exploration and build/test guidance |
+| `AGENTS-guidance.md` | Appended to `CLAUDE.md` | Development process summary, codebase exploration and build/test guidance |
+| `workflows/rfc-reservation.yml` | `.github/workflows/rfc-reservation.yml` | Merges RFC number reservation PRs once CI passes on them |
 
 Scripts in `${CLAUDE_PLUGIN_ROOT}/scripts/`:
 
 | Script | Target Path | Description |
 |--------|-------------|-------------|
 | `wt` | `scripts/wt` | Worktree manager — create, launch, list, clean worktrees |
+| `plan` | `scripts/plan` | Dispatch plan status — what can launch, what needs a doc, which gates to ask |
+| `rfc` | `scripts/rfc` | RFC number reservation, next number, and the index check |
+| `asks` | `scripts/asks` | Operator asks — every decision, review and step waiting on the human |
 
 Read each template file and write it to the target path. Do not modify the templates — they're starter content that the user will customize.
 
@@ -216,7 +225,7 @@ The `ordvik.initialized_version` field in `.ordvik.yml` records which version of
 
 **v0.1 upgrade path:**
 1. `claude plugin update ordvik` — updates plugin skills automatically (no repo changes needed)
-2. Plugin-managed repo files (`scripts/wt`, agent guidance) must be updated manually for now
+2. Plugin-managed repo files (`scripts/wt`, `scripts/plan`, `scripts/rfc`, `scripts/asks`, the reservation workflow, agent guidance) must be updated manually for now
 
 **Future `--upgrade` flag** (not yet implemented):
 - Compare `initialized_version` against the current plugin version

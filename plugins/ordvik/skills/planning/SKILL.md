@@ -1,6 +1,6 @@
 ---
 name: planning
-description: Run a planning session — review threads, triage backlog, plan waves, and generate a planning report. Use when the user asks for a planning review, weekly planning, or wants to assess project status.
+description: Run a planning session — review threads, triage backlog, plan and close dispatch plans, and generate a planning report. Use when the user asks for a planning review, weekly planning, or wants to assess project status.
 allowed_tools:
   - Read
   - Write
@@ -19,7 +19,7 @@ allowed_tools:
 
 # Planning Session Skill
 
-Runs a planning session: reviews all threads, triages the backlog, identifies ready work, and generates a planning report. This is the orchestration layer that connects threads, backlog, dispatch docs, and waves.
+Runs a planning session: reviews all threads, triages the backlog, identifies ready work, and generates a planning report. This is the orchestration layer that connects threads, backlog, dispatch docs, and dispatch plans.
 
 Requires the planning structure (`docs/planning/`). If it doesn't exist, suggest running `/ordvik:init` first.
 
@@ -28,12 +28,12 @@ Requires the planning structure (`docs/planning/`). If it doesn't exist, suggest
 The user invokes this skill as `/ordvik:planning [focus]`.
 
 - Without arguments: full planning session (all threads, full backlog review)
-- With a focus: targeted session (e.g., `/ordvik:planning wave-close 003`, `/ordvik:planning replan`)
+- With a focus: targeted session (e.g., `/ordvik:planning plan-close bootstrap-drift`, `/ordvik:planning replan`)
 
 | Focus | Description |
 |-------|-------------|
 | (none) | Full planning session |
-| `wave-close <N>` | Close out a completed wave — update backlog, threads, write retro |
+| `plan-close <slug>` | Close out a finished dispatch plan — update backlog, threads, write retro |
 | `replan` | Replanning session — assess what changed and adjust |
 | `dispatch-ready` | Review backlog for items ready to dispatch |
 
@@ -66,6 +66,19 @@ For each thread, gather data appropriate to its status:
 2. Brief note on what would trigger reactivation
 
 Use Task/Explore agents to parallelize research across many threads. Thoroughness matters more than speed.
+
+### Step 2b: Sweep Operator Asks
+
+If `scripts/asks` exists, run the sweep (`/ordvik:asks sweep`): everything
+waiting on the operator, from dispatch gates, plan gates, RFCs awaiting a
+decision, ask files, open PRs and blocked agent threads. Carry it into the
+report's "Waiting on the Operator" section. While doing so:
+
+- Propose closing stale gates (dispatch tasks that shipped but were never
+  marked done, or dispatches whose work was superseded). The operator
+  confirms each one.
+- For each candidate to automate, propose **Automate** (a backlog item for
+  the command) or **Keep** (with the reason).
 
 ### Step 3: Triage TODO.md
 
@@ -112,6 +125,14 @@ Items that are task-ready or could be made task-ready this session:
 ### Consciously Deferred
 
 - [Thread/item] — [reason, what would reactivate]
+
+### Waiting on the Operator
+
+**Decide**: [ask] — [what it unblocks] ([link])
+**Review**: [PR or check] — [state] ([link])
+**Do**: [step] — [can start now / after what] ([link])
+**Stale gates**: [gate] — [proposed close or keep]
+**Candidates to automate**: [category] ([count]) — Automate: [backlog item] / Keep: [reason]
 ```
 
 Key principles:
@@ -119,6 +140,7 @@ Key principles:
 - **Be specific about next steps** — actionable, not vague
 - **"Recent activity: None"** makes stale threads visible
 - **"Consciously Deferred"** forces explicit acknowledgment
+- **"Waiting on the Operator"** means nothing that needs the human is buried in a thread
 
 ### Step 5: Route the Report
 
@@ -145,48 +167,45 @@ Always tell the user what document changes you made.
 
 ---
 
-## Wave Close-Out
+## Plan Close-Out
 
-`/ordvik:planning wave-close <N>`
+`/ordvik:planning plan-close <slug>`
 
-1. Read all dispatch docs for wave N
-2. **Close each thread** — For each dispatch doc in the wave, run the dispatch close-out process:
-   - Verify all tasks are marked `— DONE`
-   - Verify completion criteria are checked
-   - Set `status: done` in frontmatter (or `superseded` if applicable)
-   - See `/ordvik:dispatch close` for the full thread-level checklist
-3. Check completion status of each thread (merged PRs, branch state)
-4. Update backlog — mark completed items with date, note follow-ups
-5. Update thread registry if thread statuses changed
-6. Write wave checkpoint: `docs/planning/dispatch/wave-NNN-retro.md`
-7. **Archive all wave docs** — Move all wave dispatch docs and the retro to `docs/planning/dispatch/archive/`. Files keep their original names. This clears the dispatch folder of completed work.
+1. Run `scripts/plan status <slug> --fetch`. Every thread must be `done`,
+   `superseded` or `dropped`; if not, report what remains and stop.
+2. Check each thread was closed per `/ordvik:dispatch close` (status,
+   `— DONE` markers, completion criteria, archived).
+3. Update backlog — mark completed items with date, note follow-ups
+4. Update thread registry if thread statuses changed
+5. Write the retro in the plan's **Retro** section (format below)
+6. Set the plan's `status: done` and move it to `docs/planning/plans/archive/`
 
-Note: Dispatch conventions for status lifecycle and archive rules are defined in the dispatch skill's conventions doc (`references/conventions.md` within the dispatch skill). Wave close-out orchestrates thread close-outs as a sub-step — thread-level format concerns (status fields, DONE markers, supersession) are owned by the dispatch skill.
+Note: Thread-level format concerns (status fields, DONE markers, supersession, archive) are owned by the dispatch skill and its conventions doc; the plan format and conductor loop are in the dispatch skill's `references/plans.md`.
 
 Retro format:
 
 ```markdown
-# Wave NNN Retro
+## Retro
 
 **Date**: YYYY-MM-DD
 **Threads**: [list]
 
-## Completed
+### Completed
 - [Thread] — [summary of what shipped]
 
-## Still Open
+### Still Open
 - [Thread] — [what remains, why]
 
-## Scope Changes
+### Scope Changes
 - [What changed from original dispatch and why]
 
-## Unblocked
-- [What's now ready for the next wave]
+### Unblocked
+- [What's now ready for follow-on work]
 
-## Observations
+### Observations
 - What worked well
 - What didn't
-- Process improvements for next wave
+- Process improvements for the next plan
 ```
 
 ## Replanning
@@ -198,8 +217,8 @@ Retro format:
 3. **Check for stale dispatch status** — Identify dispatch docs with `status: active` (or missing status) where work is clearly done or superseded. Flag these for close-out.
 4. Identify blocked or delayed threads
 5. Update dispatch docs (add tasks, mark descoped items with reason)
-6. Update backlog priorities
-7. Adjust wave boundaries if needed
+6. For dispatch plans in `docs/planning/plans/`, run `scripts/plan status <slug> --fetch` and route plan changes through the plan's conductor (`/ordvik:dispatch plan amend`)
+7. Update backlog priorities
 8. Record the decision — every replan must be traceable
 
 ## Dispatch-Ready Review

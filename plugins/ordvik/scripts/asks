@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+"""List what is waiting on the operator.
+
+An ask is something only the operator can move: a decision, a review, or a
+step that needs their accounts, devices or approval. Most asks are already
+recorded in git, so this reads them rather than keeping a second copy:
+
+  dispatch   an open `human_gates` entry of an active dispatch doc (the
+             gate's Task heading is not marked — DONE on the ref)
+  plan       a gate of an active plan that is not passed and that an
+             unfinished thread waits on
+  rfc        an RFC at status `considering` (drafts are counted; `--all`
+             lists the ones untouched for 60 days)
+  ask        a file in docs/planning/asks/, for asks with no other home
+
+Dispatch docs, plans' threads and RFCs are read from the ref (default
+origin/HEAD, else origin/main or origin/master); ask files and plans are
+read from the working tree, so a branch can check the asks it adds.
+
+Open PRs and blocked agent threads are not in git; the sweep
+(`/ordvik:asks sweep`) adds them to what this prints.
+
+Each ask has a kind and categories (tailnet-policy, restore-drill,
+production-rollout, ...). The kinds: decide, review, approve (a plan an
+agent can run once the operator says yes), and do (the operator's own
+hands, devices or accounts). A category with several open `do` asks is
+listed as a candidate to automate.
+
+Usage:
+  asks status [--ref <ref>] [--fetch] [--json] [--all] [--today YYYY-MM-DD]
+  asks check [--ref <ref>] [--fetch]      Validate ask files and gate entries
+
+Exit status: 0, or 1 when `check` finds errors.
+"""
+import datetime
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import signal
+import sys
+import yaml
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.dont_write_bytecode = True  # importing scripts/plan must not leave a __pycache__ beside it
+_loader = importlib.machinery.SourceFileLoader("plan", os.path.join(HERE, "plan"))
+_spec = importlib.util.spec_from_loader("plan", _loader)
+plan = importlib.util.module_from_spec(_spec)
+_loader.exec_module(plan)
+
+ASKS_DIR = "docs/planning/asks"
+KINDS = ("decide", "review", "approve", "do")
+OUTCOMES = ("done", "decided", "rejected", "automate", "dropped")
+GATE_TASK = re.compile(r"^\s*Task\s+([A-Z]?\d+)\b\W*(.*)$", re.IGNORECASE)
+TASK_LINE = re.compile(r"^#{2,4}\s+Task\s+([A-Z]?\d+)\b(.*)$", re.IGNORECASE)
+RFC_PATH = re.compile(r"(?:^|/)docs/rfcs/(\d{4})-[^/]+\.md$")
+RFC_STATUS = re.compile(r"^\s*(?:[-*]\s*)?\*\*Status\*\*\s*:\s*`?([A-Za-z-]+)", re.IGNORECASE | re.MULTILINE)
+STALE_DRAFT_DAYS = 60
+RECURRING = 3
+OPEN_DISPATCH = ("active", "")
+
+# Inferred from a gate's wording; an ask file states its own. Order matters:
+# a step that needs the operator's hands, devices or accounts is `do` even
+# when it is part of a rollout; a rollout of existing commands is `approve`.
+KIND_RULES = [
+    ("do", r"iphone|ipad|safari|vision pro|\bdevices?\b|by hand|console|1password|\blogin\b|install on|"
+           r"\bfiles?\b|\btailnet\b|tagowners|\bgrant\b|restore|drills?\b"),
+    ("decide", r"\b(accept|accepts|confirm|decide|decision|decisions|choose|design|sign off)\b"),
+    ("review", r"\b(review|reviews|inspect|checks?|parity|verify|verifies|validation)\b"),
+    ("approve", r"\b(approve|approves|approval|production|roll ?out|rollout|converge|upgrade|bootstrap|cutover)\b"),
+    ("do", r"\b(run|runs|deploy|create|creates|install|rebuild|provision|clean up|add|adds|enter)\b"),
+]
+CATEGORY_RULES = [
+    ("tailnet-policy", r"\btailnet\b|tagowners|\bacl\b|\bgrant\b|owner-only tag"),
+    ("restore-drill", r"restore|--from-backup"),
+    ("device-check", r"iphone|ipad|safari|vision pro|devices?\b|desktop browser"),
+    ("rfc", r"\brfc\b"),
+    ("credentials", r"1password|\bcas?\b|credentials?\b|enrollment"),
+    ("production-rollout", r"production|roll ?out|rollout|bootstrap|converge|cutover|deploy|upgrade|hypervisor"),
+]
+
+
+def infer_kind(text):
+    low = text.lower()
+    for kind, rx in KIND_RULES:
+        if re.search(rx, low):
+            return kind
+    return "do"
+
+
+def infer_categories(text):
+    low = text.lower()
+    return [c for c, rx in CATEGORY_RULES if re.search(rx, low)]
+
+
+def as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    return [str(value)]
+
+
+def as_date(value):
+    if isinstance(value, datetime.date):
+        return value
+    try:
+        return datetime.date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def path_dates(root, ref, pathspec, added=False):
+    """{path: date} from one pass over git log: the newest commit touching
+    each path, or with added=True the commit that added it."""
+    args = ["log", "--format=@%as", "--name-only"]
+    if added:
+        args.append("--diff-filter=A")
+    r = plan.git(root, *args, ref, "--", pathspec, check=False)
+    out, date = {}, None
+    for line in r.stdout.split("\n"):
+        if line.startswith("@"):
+            date = as_date(line[1:])
+        elif line and date:
+            if added:
+                out[line] = date  # oldest wins: log runs newest first
+            else:
+                out.setdefault(line, date)
+    return out
+
+
+def task_marks(body):
+    """{task id: done} from `## Task N` headings (also `### Task G1`)."""
+    out = {}
+    for line in body.split("\n"):
+        m = TASK_LINE.match(line)
+        if m:
+            out[m.group(1).upper()] = bool(plan.DONE_MARK.search(m.group(2)))
+    return out
+
+
+def task_order(tid):
+    """Sort key for task ids: numbered tasks in order, lettered ones after."""
+    return (0, int(tid), "") if tid.isdigit() else (1, int(tid[1:]), tid[0])
+
+
+def dispatch_gates(root, ref):
+    """(docs keyed by thread, gate entries) for every unarchived dispatch doc."""
+    docs = plan.dispatch_docs(root, ref)
+    gates = []
+    for doc in docs.values():
+        if doc["archived"]:
+            continue
+        text = plan.git(root, "show", f"{ref}:{doc['path']}").stdout
+        try:
+            meta, body = plan.split_frontmatter(text)
+        except yaml.YAMLError:
+            meta, body = plan.loose_frontmatter(text)
+            meta["human_gates"] = None
+        marks = task_marks(body)
+        entries = [str(g) for g in as_list_raw(meta.get("human_gates"))]
+        gate_tasks = set()
+        parsed = []
+        for g in entries:
+            m = GATE_TASK.match(g)
+            task = m.group(1).upper() if m else None
+            if task:
+                gate_tasks.add(task)
+            parsed.append((task, (m.group(2) if m else g).strip()))
+        for task, text in parsed:
+            gates.append({"doc": doc, "task": task, "text": text, "marks": marks,
+                          "gate_tasks": gate_tasks})
+    return docs, gates
+
+
+def as_list_raw(value):
+    return value if isinstance(value, list) else []
+
+
+def load_plans(root):
+    out = []
+    d = os.path.join(root, plan.PLANS_DIR)
+    if not os.path.isdir(d):
+        return out
+    for name in sorted(os.listdir(d)):
+        if name.endswith(".md"):
+            p = plan.load_plan(os.path.join(d, name))
+            if p["status"] == "active":
+                out.append(p)
+    return out
+
+
+def plan_waiters(plans, docs, thread, task):
+    """Plan threads, not yet done, that wait on this dispatch task (or on
+    the whole thread, which this gate is part of)."""
+    out = []
+    for p in plans:
+        for t in p["threads"]:
+            if t.get("dropped"):
+                continue
+            d = docs.get(t["id"])
+            if d and d["status"] in ("done", "superseded"):
+                continue
+            for a in t["after"]:
+                dep, _, n = a.partition(":")
+                if dep == thread and (not n or task is None or n.upper() == task):
+                    out.append(t["id"])
+                    break
+    return sorted(set(out))
+
+
+def gather(root, ref, today, show_all):
+    docs, gates = dispatch_gates(root, ref)
+    plans = load_plans(root)
+    added = path_dates(root, ref, plan.DISPATCH_DIR, added=True)
+    asks = []
+
+    for g in gates:
+        doc = g["doc"]
+        if doc["status"] not in OPEN_DISPATCH:
+            continue
+        task, marks = g["task"], g["marks"]
+        if task is not None and marks.get(task):
+            continue
+        # Tasks before the gate that are not themselves gates and not marked
+        # DONE: either the gate is not reachable yet, or the doc is stale.
+        unmarked = [] if task is None else sorted(
+            (n for n, done in marks.items()
+             if task_order(n) < task_order(task) and n not in g["gate_tasks"] and not done),
+            key=task_order)
+        thread = doc["thread"]
+        raised = added.get(doc["path"])
+        asks.append({
+            "id": f"dispatch:{thread}:{task}" if task is not None else f"dispatch:{thread}",
+            "source": "dispatch",
+            "kind": infer_kind(g["text"]),
+            "categories": infer_categories(g["text"]),
+            "state": "ready",
+            "unmarked": unmarked,
+            "label": f"{thread} Task {task}" if task is not None else thread,
+            "text": g["text"],
+            "where": doc["path"],
+            "title": doc["title"],
+            "unblocks": plan_waiters(plans, docs, thread, task),
+            "raised": raised.isoformat() if raised else None,
+        })
+
+    for p in plans:
+        threads = plan.evaluate(p, docs, set())
+        for pg in plan.pending_gates(p, threads):
+            asks.append({
+                "id": f"plan:{p['slug']}:{pg['id']}",
+                "source": "plan",
+                "kind": "decide",
+                "categories": infer_categories(pg["ask"]),
+                "state": "ready",
+                "label": f"{p['slug']} gate {pg['id']}",
+                "text": pg["ask"],
+                "where": os.path.relpath(p["path"], root),
+                "unblocks": pg["unblocks"],
+                "raised": None,
+            })
+
+    touched = path_dates(root, ref, "*docs/rfcs/*.md")
+    drafts = []
+    r = plan.git(root, "ls-tree", "-r", "--name-only", ref)
+    for path in r.stdout.split():
+        m = RFC_PATH.search(path)
+        if not m or "/archive/" in path:
+            continue
+        text = plan.git(root, "show", f"{ref}:{path}").stdout
+        meta = {}
+        try:
+            meta, _ = plan.split_frontmatter(text)
+        except yaml.YAMLError:
+            pass
+        status = str(meta.get("status") or "")
+        if not status:
+            sm = RFC_STATUS.search(text)
+            status = sm.group(1) if sm else ""
+        status = status.lower()
+        title = next((ln[2:].strip() for ln in text.split("\n") if ln.startswith("# ")), path)
+        last = touched.get(path)
+        if status == "considering":
+            asks.append({
+                "id": f"rfc:{path}",
+                "source": "rfc",
+                "kind": "decide",
+                "categories": ["rfc"],
+                "state": "ready",
+                "label": rfc_label(path, m.group(1)),
+                "text": f"Accept, revise or reject: {title}",
+                "where": path,
+                "unblocks": [],
+                "raised": last.isoformat() if last else None,
+            })
+        elif status == "draft":
+            idle = (today - last).days if last else None
+            drafts.append({"path": path, "title": title, "idle_days": idle})
+    stale = [d for d in drafts if d["idle_days"] is not None and d["idle_days"] >= STALE_DRAFT_DAYS]
+
+    files, _ = ask_files(root)
+    for a in files:
+        if a["answered"]:
+            continue
+        defer = as_date(a["meta"].get("defer_until")) if a["meta"].get("defer_until") else None
+        state = "deferred" if defer and defer > today else "ready"
+        asks.append({
+            "id": f"ask:{a['slug']}",
+            "source": "ask",
+            "kind": str(a["meta"].get("kind", "do")),
+            "categories": as_list(a["meta"].get("category")),
+            "state": state,
+            "deferred_until": defer.isoformat() if state == "deferred" else None,
+            "label": a["slug"],
+            "text": str(a["meta"].get("ask", "")),
+            "where": a["path"],
+            "from": a["meta"].get("from"),
+            "unblocks": as_list(a["meta"].get("unblocks")),
+            "raised": str(a["meta"].get("raised")) if a["meta"].get("raised") else None,
+        })
+
+    for a in asks:
+        d = as_date(a["raised"]) if a["raised"] else None
+        a["age_days"] = (today - d).days if d else None
+
+    recurring = {}
+    for a in asks:
+        if a["kind"] == "do" and a["state"] != "deferred":
+            for c in a["categories"]:
+                recurring.setdefault(c, []).append(a["id"])
+    return asks, recurring, {"count": len(drafts), "stale": stale if show_all else [], "stale_count": len(stale)}
+
+
+def rfc_label(path, number):
+    """`RFC 0092` for a root RFC, `search RFC 0003` for a project's."""
+    scope = path.split("/docs/rfcs/")[0] if "/docs/rfcs/" in path else ""
+    return f"{scope} RFC {number}" if scope else f"RFC {number}"
+
+
+def ask_files(root):
+    """(parsed ask files, errors) from the working tree: open asks in
+    docs/planning/asks/, answered ones in its archive/."""
+    out, errors = [], []
+    base = os.path.join(root, ASKS_DIR)
+    for sub in ("", "archive"):
+        d = os.path.join(base, sub)
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".md") or name == "README.md":
+                continue
+            rel = os.path.relpath(os.path.join(d, name), root)
+            with open(os.path.join(d, name)) as f:
+                text = f.read()
+            try:
+                meta, _ = plan.split_frontmatter(text)
+            except yaml.YAMLError as e:
+                errors.append(f"{rel}: frontmatter is not valid YAML ({str(e).splitlines()[0]})")
+                continue
+            if not meta:
+                errors.append(f"{rel}: no YAML frontmatter")
+                continue
+            out.append({"path": rel, "slug": name[:-3], "meta": meta,
+                        "archived": sub == "archive", "answered": bool(meta.get("answered"))})
+    return out, errors
+
+
+def check(root, ref):
+    errors, warnings = [], []
+    files, errs = ask_files(root)
+    errors += errs
+    for a in files:
+        m, rel = a["meta"], a["path"]
+        if not str(m.get("ask") or "").strip():
+            errors.append(f"{rel}: `ask` is missing")
+        if m.get("kind") not in KINDS:
+            errors.append(f"{rel}: kind {m.get('kind')!r} is not one of {', '.join(KINDS)}")
+        if not as_date(m.get("raised")):
+            errors.append(f"{rel}: `raised` must be a date (YYYY-MM-DD)")
+        if m.get("defer_until") and not as_date(m.get("defer_until")):
+            errors.append(f"{rel}: `defer_until` must be a date")
+        if a["answered"]:
+            if not as_date(m.get("answered")):
+                errors.append(f"{rel}: `answered` must be a date")
+            if m.get("outcome") not in OUTCOMES:
+                errors.append(f"{rel}: an answered ask needs outcome, one of {', '.join(OUTCOMES)}")
+            if not str(m.get("answer") or "").strip():
+                errors.append(f"{rel}: an answered ask needs `answer`")
+            if not a["archived"]:
+                warnings.append(f"{rel}: answered; git mv it to {ASKS_DIR}/archive/")
+        elif a["archived"]:
+            errors.append(f"{rel}: in archive/ but has no `answered` date")
+    docs, gates = dispatch_gates(root, ref)
+    for g in gates:
+        doc = g["doc"]
+        if doc["status"] not in OPEN_DISPATCH:
+            continue
+        if g["task"] is None:
+            warnings.append(f"{doc['path']}: human gate {g['text']!r} names no task (\"Task N: ...\")")
+        elif g["task"] not in g["marks"]:
+            warnings.append(f"{doc['path']}: human gate names Task {g['task']}, which has no `## Task` heading")
+    return errors, warnings
+
+
+SECTIONS = [("decide", "Decide"), ("review", "Review"), ("approve", "Approve"), ("do", "Do")]
+
+
+def sort_key(a):
+    """Most unblocked first, then gates whose earlier tasks are all marked
+    DONE, then oldest."""
+    return (-len(a["unblocks"]), bool(a.get("unmarked")), -(a["age_days"] or 0), a["id"])
+
+
+def print_status(asks, recurring, drafts, ref, sha, today, shallow):
+    print(f"Asks for the operator as of {ref} {sha[:12]} ({today})")
+    open_ = [a for a in asks if a["state"] == "ready"]
+    w = min(max((len(a["label"]) for a in asks), default=10), 32)
+    for kind, heading in SECTIONS:
+        items = sorted((a for a in open_ if a["kind"] == kind), key=sort_key)
+        if not items:
+            continue
+        print()
+        print(f"{heading} ({len(items)})")
+        for a in items:
+            age = f"{a['age_days']}d" if a["age_days"] is not None else ""
+            flag = "*" if a.get("unmarked") else " "
+            print(f" {flag}{a['label']:<{w}} {age:>5}  {a['text']}")
+            extra = []
+            if a["unblocks"]:
+                extra.append(f"unblocks {', '.join(a['unblocks'])}")
+            if a.get("from"):
+                extra.append(f"from {a['from']}")
+            extra.append(a["where"])
+            print(f"  {'':<{w}} {'':>5}  " + " · ".join(extra))
+    if any(a.get("unmarked") for a in open_):
+        print()
+        print("* Earlier tasks of that dispatch are not marked — DONE: the gate is not")
+        print("  reachable yet, or the doc is stale (mark the tasks, or close the dispatch).")
+    deferred = [a for a in asks if a["state"] == "deferred"]
+    if deferred:
+        print()
+        print(f"Deferred ({len(deferred)})")
+        for a in deferred:
+            print(f"  {a['label']:<{w}} until {a['deferred_until']}  {a['text']}")
+    candidates = {c: ids for c, ids in recurring.items() if len(ids) >= RECURRING}
+    if candidates:
+        print()
+        print(f"Candidates to automate ({RECURRING}+ open `do` asks of one kind)")
+        for c, ids in sorted(candidates.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            print(f"  {c:<20} {len(ids):>2}  {', '.join(i.split(':', 1)[1] for i in ids)}")
+    print()
+    line = f"RFC drafts: {drafts['count']}, {drafts['stale_count']} untouched for {STALE_DRAFT_DAYS}+ days"
+    print(line + ("" if drafts["stale"] or not drafts["stale_count"] else " (--all lists them)"))
+    for d in sorted(drafts["stale"], key=lambda d: -d["idle_days"]):
+        print(f"  {d['idle_days']:>4}d  {d['path']}")
+    if shallow:
+        print("Ages are unreliable: this clone is shallow (git fetch --unshallow origin).")
+    print("Not in git: open PRs and blocked agent threads (the sweep adds them).")
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0 if argv else 1
+    cmd, rest = argv[0], argv[1:]
+    if cmd not in ("status", "check"):
+        print(f"Error: unknown command {cmd!r}.\n")
+        print(__doc__.strip())
+        return 1
+    ref, as_json, fetch, show_all, today = None, False, False, False, datetime.date.today()
+    i = 0
+    while i < len(rest):
+        if rest[i] in ("--ref", "--today") and i + 1 < len(rest):
+            if rest[i] == "--ref":
+                ref = rest[i + 1]
+            else:
+                today = as_date(rest[i + 1]) or sys.exit("Error: --today takes YYYY-MM-DD.")
+            i += 2
+            continue
+        if rest[i] == "--json":
+            as_json = True
+        elif rest[i] == "--fetch":
+            fetch = True
+        elif rest[i] == "--all":
+            show_all = True
+        else:
+            print(f"Error: unexpected argument {rest[i]!r}.")
+            return 1
+        i += 1
+    root = plan.repo_root()
+    if fetch:
+        plan.git(root, "fetch", "-q", "origin")
+    ref = ref or plan.default_ref(root)
+    try:
+        sha = plan.git(root, "rev-parse", "--verify", ref + "^{commit}").stdout.strip()
+        if cmd == "check":
+            errors, warnings = check(root, ref)
+        else:
+            asks, recurring, drafts = gather(root, ref, today, show_all)
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return 1
+
+    if cmd == "check":
+        for w in warnings:
+            print(f"warning: {w}")
+        for e in errors:
+            print(f"error: {e}")
+        if not errors:
+            print("Asks: no errors.")
+        return 1 if errors else 0
+    if as_json:
+        json.dump({"ref": ref, "commit": sha, "today": today.isoformat(), "asks": asks,
+                   "recurring": recurring, "rfc_drafts": drafts}, sys.stdout, indent=2)
+        print()
+        return 0
+    shallow = plan.git(root, "rev-parse", "--is-shallow-repository", check=False).stdout.strip() == "true"
+    print_status(asks, recurring, drafts, ref, sha, today, shallow)
+    return 0
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # quiet under `| head`
+    sys.exit(main(sys.argv[1:]))

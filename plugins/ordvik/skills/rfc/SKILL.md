@@ -8,6 +8,8 @@ allowed_tools:
   - Glob
   - Grep
   - Bash(git config *)
+  - Bash(git fetch *)
+  - Bash(scripts/rfc *)
   - WebSearch
   - WebFetch
   - Task
@@ -48,6 +50,7 @@ The user invokes this skill as `/ordvik:rfc <operation> [args...]`. Parse the fi
 |-----------|-----------|
 | `author` | `[<short-title>]` |
 | `create` | `[--scope <project>] <short-title>` |
+| `reserve` | `[--scope <project>] <short-title>` |
 | `child` | `<parent-number> <short-title>` |
 | `list` | `[--scope <project>] [--status <status>]` |
 | `update-status` | `<number> <new-status>` |
@@ -61,7 +64,10 @@ If the user asks to write, draft, or author an RFC conversationally (e.g., "let'
 
 ## Lifecycle States
 
-Valid statuses: `draft`, `considering`, `accepted`, `rejected`, `paused`, `superseded`.
+Valid statuses: `draft`, `considering`, `accepted`, `implemented`, `rejected`, `paused`, `superseded`.
+
+- `accepted` stays while the rollout is in progress; `implemented` means the product shipped.
+- **Merging an RFC's PR accepts it.** An RFC is written to be accepted: the PR that lands it sets `status: accepted` in the same commit, so the merge is the operator's acceptance. The exception is an RFC tabled to keep work in progress: its PR says so in the title or first line ("tabled to iterate further") and lands it as `draft` (or `paused`). `considering` is for an RFC whose questions are settled but which waits on something else before acceptance.
 
 ## Required Frontmatter Fields
 
@@ -142,18 +148,30 @@ Enter the full authoring workflow (see **Authoring Workflow** below). The short-
 ### `create [--scope <project>] <short-title>`
 
 1. Build the scope registry (see Scope Resolution above).
-2. Read the conventions file (project-local first, then plugin default) for numbering rules.
-3. **Determine scope:**
+2. **Determine scope:**
    - If `--scope` is given, look it up in the scope registry. Error if unknown.
    - In single-scope repos, use root scope.
    - In multi-scope repos without `--scope`, infer from context or ask the user.
-   - If the target directory doesn't exist, create it.
-4. Use `Glob` to scan for existing RFC files in the target scope's directory.
-5. Determine the next available number (4-digit zero-padded). Account for legacy numbering and retired numbers from the scope's config in `.ordvik.yml`. **Check for collisions** — if concurrent authoring could have created a file with this number since the scan, re-scan before writing. If a collision is detected, increment and retry.
-6. Get the author name: run `git config user.name` via Bash.
-7. Read the template file (project-local `docs/rfcs/template.md` first, then `${CLAUDE_SKILL_DIR}/references/template.md`) and fill in: number, title (convert short-title from kebab-case to Title Case), author, today's date.
-8. Write the file as `NNNN-<short-title>.md` in the target scope's directory.
-9. Report the created file path, RFC number, and scope name.
+3. **Reserve the number.** If the repo has `scripts/rfc`, run `reserve` (below) and wait until its PR has merged, then start the RFC's own branch from the default branch; the stub and index row are already there. Without `scripts/rfc`, fall back to scanning: take one past the highest number in the scope's directory (accounting for legacy digits, retired numbers and `next_min` in `.ordvik.yml`), and re-scan just before writing in case a concurrent author took it.
+4. Get the author name: run `git config user.name` via Bash.
+5. Read the template file (project-local `docs/rfcs/template.md` first, then `${CLAUDE_SKILL_DIR}/references/template.md`) and fill in: number, title (convert short-title from kebab-case to Title Case), author, today's date. With a reservation, replace the stub's body and keep its heading.
+6. Write the file as `NNNN-<short-title>.md` in the target scope's directory.
+7. Report the created file path, RFC number, and scope name.
+
+With a reservation, the RFC's PR edits only its own file and its own index row. It never touches the `Next number` line or other rows, so RFC PRs don't conflict with each other.
+
+### `reserve [--scope <project>] <short-title>`
+
+Takes the next number in a scope with a PR that the repo's `rfc-reservation` workflow merges once the repo's CI passes on it. Needs `scripts/rfc` and `.github/workflows/rfc-reservation.yml` (`/ordvik:init` offers both).
+
+1. Determine the scope as for `create`.
+2. `git fetch origin` and start from a fresh default branch. In a cloud session, use the session's own branch, reset to the default branch.
+3. Run `scripts/rfc reserve --scope <dir> [--min <next_min>] <short-title> "<Title>"`. It writes the stub `NNNN-<short-title>.md`, appends the row to the scope README's index table, bumps its `Next number` line, and prints the stub's path. Commit nothing else.
+4. Commit (`docs(rfc): reserve NNNN <short-title>`), push, and open a ready (not draft) PR containing only that commit.
+5. When CI passes on the PR, the workflow checks it with `scripts/rfc verify-reservation`, run from the default branch, and rebase-merges it. If CI passed but the PR is still open, run the workflow by hand with the PR number. If the number was taken on the default branch first, reset and reserve again.
+6. Once it has merged, write the RFC on a new PR. A cloud session restarts its branch from the default branch for this, since the reservation PR is merged.
+
+`scripts/rfc next --scope <dir>` prints the next free number without reserving it. `scripts/rfc check` fails on two files sharing a number, unless the scope README's "Number Collisions" table lists it, and on a `Next number` that's already taken; run it in the repo's test suite.
 
 ### `child <parent-number> <short-title>`
 
@@ -257,7 +275,7 @@ Always runs. This is where parked solution ideas from Phase 1 become candidates.
 
 Write the full RFC document.
 
-1. **Create RFC file** — Use the `create` operation (in the appropriate scope) if the file doesn't exist yet.
+1. **Create RFC file** — Use the `create` operation (in the appropriate scope) if the file doesn't exist yet. Where the repo has `scripts/rfc`, reserve as soon as the scope is settled in Phase 1, so the number is held while research runs.
 2. **Write all sections:**
    - **Problem** — From Phase 1 (already drafted)
    - **Proposal** — Concrete solution based on the chosen direction from Phase 2
@@ -288,9 +306,5 @@ Land the RFC and handle downstream effects.
 1. **Final cleanup** — Remove any remaining markers (COMMENT, QUESTION, Research Notes). Ensure all sections are complete.
 2. **Review pass** — Quick self-review against the review checklist (`${CLAUDE_SKILL_DIR}/references/review-checklist.md`). Flag any remaining concerns.
 3. **Design doc plan** — If design doc impacts were identified in Phase 3, confirm the plan for updating them.
-4. **Present options:**
-   - (a) Commit as `draft` — for future review by others
-   - (b) Update status to `considering` — ready for broader review
-   - (c) Update status to `accepted` — approved for implementation
-   - (d) Begin implementation — if the user wants to continue immediately
+4. **Set the status the PR lands with.** By default the RFC goes up as `accepted`, since merging its PR is the acceptance (see Lifecycle States). If the operator wants to table it and keep iterating later, it goes up as `draft` and the PR says it is tabled. Then offer to begin implementation (a plan and dispatches) once it has merged.
 5. **Commit** — Offer to commit the RFC (and any design doc updates) with an appropriate commit message.

@@ -55,11 +55,12 @@ The user invokes this skill as `/ordvik:dispatch <operation> [args...]`.
 
 | Operation | Arguments |
 |-----------|-----------|
-| `create`  | `<slug> [--thread N] [--wave N] [--source <ref>]` |
-| `list`    | `[--wave N] [--archived] [--status <s>]` |
+| `create`  | `<slug> [--plan <slug>] [--source <ref>]` |
+| `list`    | `[--plan <slug>] [--archived] [--status <s>]` |
 | `review`  | `<file>` |
 | `close`   | `<file> [--superseded-by <ref>]` |
 | `mark-done` | `<file> <task-number>` |
+| `plan` | `new <slug>` \| `status <slug>` \| `conduct <slug>` \| `amend <slug>` |
 
 If invoked with no arguments, show help. If the user asks conversationally to "write a dispatch doc" or "create tasks for X", treat as `create`.
 
@@ -69,12 +70,19 @@ If invoked with no arguments, show help. If the user asks conversationally to "w
 
 ### Filename
 
-Pattern: `WWW-TTT-<slug>.md` where:
-- `WWW` = wave number (zero-padded, e.g., `006`)
-- `TTT` = thread number (zero-padded, e.g., `015`)
+Pattern: `YYYYMMDD-<slug>.md` where:
+- `YYYYMMDD` = the day the doc is written (e.g., `20261023`)
 - `<slug>` = kebab-case human-readable description
 
-If no wave is specified, omit the wave prefix: `TTT-<slug>.md`.
+The filename without `.md` is the thread id, and the frontmatter `thread:`
+repeats it. Named ids need no reservation: two threads only collide when
+they start the same day with the same slug, which is a real collision.
+`scripts/plan check` (no plan argument) fails when two active docs share
+an id.
+
+Older docs are numbered (`015-<slug>.md`, thread `"015"`) and keep their
+numbers; both kinds of id work everywhere. Some carry a `WWW-` wave
+prefix (`006-015-<slug>.md`); waves are retired, so new docs have none.
 
 ### YAML Frontmatter (required)
 
@@ -82,9 +90,8 @@ The frontmatter is **machine-parsed** by launch scripts. The `branch` field is r
 
 ```yaml
 ---
-thread: "015"
-wave: "006"
-branch: thread/<slug>
+thread: "20261023-widget-api"
+branch: thread/widget-api
 executor: agent
 scope: search                    # multi-scope repos: which project this targets
 source: RFC search/0069
@@ -99,14 +106,15 @@ Field reference:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `thread` | yes | Thread number from `docs/planning/threads.md` (if it exists) |
-| `wave` | no | Wave number if part of a batch |
+| `thread` | yes | The thread id: the filename without `.md` for new docs (`20261023-widget-api`); a number for older ones |
+| `wave` | no | Retired: older docs only. Do not add it; plans order threads |
 | `branch` | **yes** | Git branch name — launch scripts create a worktree with this branch |
 | `executor` | yes | `agent`, `human`, or `mixed` — launch scripts skip `human` threads |
 | `scope` | no | Target scope name from `.ordvik.yml` (multi-scope repos only). Omit for single-scope repos or root-scope work. |
 | `source` | yes | Where this work comes from. Use scope-prefixed RFC refs in multi-scope repos (e.g., `RFC search/0069`). |
 | `status` | no | Lifecycle state: `active` (default, can be omitted), `done`, or `superseded`. See conventions doc for lifecycle rules. |
-| `depends_on` | no | Thread numbers that must complete first |
+| `plan` | no | Slug of the dispatch plan this thread belongs to (`docs/planning/plans/<slug>.md`) |
+| `depends_on` | no | Thread ids that must complete first. Leave it out when `plan` is set: the plan owns ordering |
 | `human_gates` | no | List of task descriptions that require human execution |
 | `platform` | no | `darwin`, `linux`, or `any` (default: `any`) — platform constraint |
 | `repo` | no | Cross-repo dispatch target (see below) |
@@ -164,7 +172,7 @@ The `repo` field documents the relationship even when launch is manual — it te
 ### Document Body
 
 ```markdown
-# Thread TTT: Title
+# Thread <id>: Title
 
 **Goal**: One-sentence description of what this thread accomplishes.
 
@@ -294,7 +302,7 @@ Shared testing strategy across all tasks (unit, integration, regression).
 
 ## Operations
 
-### `create <slug> [--thread N] [--wave N] [--source <ref>]`
+### `create <slug> [--plan <slug>] [--source <ref>]`
 
 1. **Check planning structure** — If `docs/planning/dispatch/` doesn't exist, create it. Note whether `docs/planning/threads.md` and `docs/planning/backlog.md` exist (used for context but not required).
 
@@ -303,7 +311,7 @@ Shared testing strategy across all tasks (unit, integration, regression).
 3. **Gather context** — Use `AskUserQuestion` to understand:
    - What work needs to be done? (or read from the referenced backlog item/RFC)
    - What thread does this belong to? (check `docs/planning/threads.md` if it exists)
-   - Is this part of a wave? (check `docs/planning/backlog.md` for wave groupings if it exists)
+   - Is this part of a plan? (check `docs/planning/plans/`; if so, add `plan:` and its entry in the plan, not `depends_on`)
    - What is the source? (RFC, backlog item, ad-hoc). Use scope-prefixed RFC references in multi-scope repos.
    - Which scope does this target? (multi-scope repos only)
    - Does the work happen in a different repo? If so, gather `repo` fields (path, url, add_dirs).
@@ -335,24 +343,25 @@ Shared testing strategy across all tasks (unit, integration, regression).
    - If the thread has 4+ implementation tasks, add an `(Audit)` task as the final task before the Pre-PR Checklist.
    - If the work has clearly specifiable acceptance criteria (APIs, data flows, behavioral contracts), consider leading with a `(Contract)` task that writes tests before implementation begins.
 
-7. **Identify human gates** — Mark tasks that require human execution:
-   - Deployment to production
-   - Operational verification (checking dashboards, logs)
-   - Decisions requiring judgment calls
-   - Access to systems the agent can't reach
+7. **Identify human gates** — The operator is asked only for judgement or a decision (see `references/process.md` beside the plugin's skills, "The operator's time"). Mark a task as a human gate only when it is one of:
+   - **Approve**: a production step built from existing commands. The thread shows the dry run, the operator approves it, and the thread runs `--commit` on a venue that holds the authority. Word it as an approval and name the command.
+   - **Decide**: a judgement call or a choice between options.
+   - **Do**: something that needs the operator's own hands, devices or accounts and no command covers. Each one is a candidate to automate.
 
-8. **Write the document** — Create the file at `docs/planning/dispatch/WWW-TTT-<slug>.md` following the format above. In multi-scope repos, include the `scope` field in frontmatter. Always include the Pre-PR Checklist and Pre-existing issues sections.
+   A list of commands for the operator to type is not a gate; it is a missing command.
 
-9. **Report** — Show the user: file path, thread/wave numbers, scope (if multi-scope), task count, and any human gates.
+8. **Write the document** — Create the file at `docs/planning/dispatch/YYYYMMDD-<slug>.md` (today's date) following the format above. In multi-scope repos, include the `scope` field in frontmatter. Always include the Pre-PR Checklist and Pre-existing issues sections.
 
-### `list [--wave N] [--archived] [--status <s>]`
+9. **Report** — Show the user: file path, thread id, plan (if any), scope (if multi-scope), task count, and any human gates.
 
-1. Glob `docs/planning/dispatch/*.md` (exclude wave retros and human-week docs). By default, exclude `archive/` subdirectory.
+### `list [--plan <slug>] [--archived] [--status <s>]`
+
+1. Glob `docs/planning/dispatch/*.md` (exclude human-week docs). By default, exclude `archive/` subdirectory.
 2. If `--archived` is given, also glob `docs/planning/dispatch/archive/*.md` and include those results.
 3. Parse YAML frontmatter from each file. Treat missing `status` as `active`.
-4. If `--wave` is given, filter to that wave only.
+4. If `--plan` is given, filter to docs with that `plan`.
 5. If `--status` is given, filter to that status only (e.g., `--status done`).
-6. Output a table: **File**, **Thread**, **Wave**, **Status**, **Executor**, **Source**, **Branch**.
+6. Output a table: **File**, **Thread**, **Plan**, **Status**, **Executor**, **Source**, **Branch**.
 
 ### `close <file> [--superseded-by <ref>]`
 
@@ -371,10 +380,8 @@ Closes a dispatch thread by updating its status and archiving. Read `${CLAUDE_SK
    - Validate all tasks have the `— DONE` marker. If any are missing, report which tasks are not marked done and ask the user to confirm or mark them.
    - Validate all completion criteria checkboxes are checked (`[x]`). Report any unchecked items.
    - Set `status: done` in frontmatter
-   - Determine archive timing:
-     - If the thread belongs to a wave: archive after wave retro (tell the user the doc will be archived during `wave-close`)
-     - If standalone (no wave): archive immediately to `docs/planning/dispatch/archive/`
-   - Check if the wave is now complete (all threads `done` or `superseded`). If so, prompt the user to run `/ordvik:planning wave-close <N>`.
+   - Archive immediately to `docs/planning/dispatch/archive/` (in the thread's own PR when it has one)
+   - If the doc has `plan:`, run `scripts/plan status <slug>`. If every thread is finished, prompt the user to run `/ordvik:planning plan-close <slug>`; otherwise tell the plan's conductor what this unblocks.
    - Ask the user about backlog follow-ons — are there new items to add from this work?
 
 ### `mark-done <file> <task-number>`
@@ -386,6 +393,35 @@ Convenience operation to standardize the task completion marker.
 3. If the heading already has `— DONE`, report that it's already marked and do nothing.
 4. Append ` — DONE` to the heading text.
 5. Write the updated file.
+
+### `plan new|status|conduct|amend <slug>`
+
+Dispatch plans: work that spans more than one round of threads gets a plan file in
+`docs/planning/plans/<slug>.md` listing its threads, what each waits on (a
+thread, one task of a thread, or an operator gate), and a log of changes.
+One agent, the plan's **conductor**, keeps it moving. Read
+`${CLAUDE_SKILL_DIR}/references/plans.md` first: it defines the format, the
+thread states, the conductor's loop and how plans change.
+
+The status tool is `scripts/plan` (installed by `/ordvik:init` from
+`${CLAUDE_PLUGIN_ROOT}/scripts/plan`). If the repo lacks it, run it from the
+plugin: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/plan ...`.
+
+- **`new`**: write `docs/planning/plans/<slug>.md` (frontmatter `plan`,
+  `title`, `status`, `source`, `conductor`, `threads`, `gates`; body with
+  Decisions, Threads, Not in this plan, Log). Write dispatch docs for the
+  threads that can start first with `create`, adding `plan: <slug>` and no `depends_on`.
+  Later threads may stay sketches (`title` and `after`, no doc). Ordering
+  that hangs on part of a thread is a task dependency (`"101:2"`), not a
+  whole-thread one. Run `scripts/plan check <slug>` before the PR.
+- **`status`**: `scripts/plan status <slug> --fetch`, then say what can
+  launch, what needs a doc, and which gates to ask.
+- **`conduct`**: one pass of the conductor's loop in the reference:
+  launch `ready` threads (not ones already launched), write docs for
+  `write-doc` sketches, ask pending gates, report only what changed.
+- **`amend`**: change `threads`, `after`, `gates` or `dropped`, add a dated
+  Log line (what, why, who asked), tell launched threads the change affects,
+  `scripts/plan check`, docs PR.
 
 ### `review <file>`
 
@@ -411,6 +447,7 @@ Convenience operation to standardize the task completion marker.
    - [ ] Audit task bodies are self-contained — no references to "Task N created/did X"
    - [ ] If `(Contract)` tasks exist: bound implementation tasks include a **Contract** field
    - [ ] If `(Contract)` tasks exist: contract deliverable files are not listed as modifiable in implementation task deliverables
+   - [ ] If `plan` is present: the plan lists this thread, the doc has no `depends_on`, and `scripts/plan check <slug>` passes
    - [ ] If `repo` is present: `path` and `url` are set, `add_dirs` includes the planning hub, Context section notes the cross-repo setup
 3. Report findings and suggest fixes.
 

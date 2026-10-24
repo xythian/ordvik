@@ -1,0 +1,120 @@
+# Merges an RFC number reservation once tier 1 passes on it, so the number
+# is taken on master before the RFC is written (scripts/rfc, the rfc
+# skill's `reserve`). A reservation adds one stub RFC file, its index row
+# and the Next number bump, and nothing else; every other pull request is
+# skipped.
+#
+# It runs when each workflow behind a required check finishes (list them
+# in workflow_run.workflows), so nothing red is merged; a merge tried
+# before the others are done is refused, and the last one's run merges.
+# workflow_run always runs this file and the script from master, never
+# from the pull request. Run it by hand with a PR number for a
+# reservation whose ci finished without it.
+#
+# Master's ruleset lets only bypass actors merge. The merge uses a token
+# from the rfc-reservation GitHub App, the ruleset's only app bypass, so
+# no other workflow can merge: the App's key is a secret of the
+# rfc-reservation environment, which only master's workflows can use, and
+# only the merge job names it. RFC_APP_ID is a variable there too.
+name: rfc-reservation
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number of the reservation
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      number: ${{ steps.pr.outputs.number }}
+      sha: ${{ steps.pr.outputs.sha }}
+      reservation: ${{ steps.verify.outputs.reservation }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      # The open, ready, same-repository PR whose head is the commit ci ran on.
+      - name: Find the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_PR: ${{ inputs.pr }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ -n "$INPUT_PR" ]; then
+            q=".number == $INPUT_PR"
+          else
+            q=".head.sha == \"$RUN_SHA\""
+          fi
+          pr=$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=$BASE&per_page=100" --paginate \
+            --jq ".[] | select($q) | select(.draft | not) | select(.head.repo.full_name == \"$GITHUB_REPOSITORY\") | \"\(.number) \(.head.sha)\"" | head -1)
+          if [ -z "$pr" ]; then
+            echo "No open, ready pull request from this repository for this run."
+            exit 0
+          fi
+          echo "number=${pr% *}" >> "$GITHUB_OUTPUT"
+          echo "sha=${pr#* }" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the reservation
+        id: verify
+        if: ${{ steps.pr.outputs.number }}
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          git fetch -q origin "$HEAD_SHA"
+          # Until the script is on the base branch there is nothing to check.
+          if [ ! -f scripts/rfc ]; then
+            echo "reservation=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          out=$(python3 scripts/rfc verify-reservation HEAD "$HEAD_SHA" 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          case $code in
+            0) echo "reservation=true" >> "$GITHUB_OUTPUT" ;;
+            3) echo "reservation=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::$out"; exit 1 ;;
+          esac
+
+  merge:
+    needs: verify
+    if: ${{ needs.verify.outputs.reservation == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: rfc-reservation
+    steps:
+      - name: Mint the App token
+        id: app
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RFC_APP_ID }}
+          private-key: ${{ secrets.RFC_APP_PRIVATE_KEY }}
+
+      # Rebase keeps master free of merge commits; sha refuses a push that
+      # landed after the check. The REST call, not `gh pr merge`, which
+      # refuses a blocked PR before asking GitHub, so the App's ruleset
+      # bypass would never be tried.
+      - name: Merge
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR: ${{ needs.verify.outputs.number }}
+          HEAD_SHA: ${{ needs.verify.outputs.sha }}
+        run: |
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/$PR/merge" -f merge_method=rebase -f sha="$HEAD_SHA"

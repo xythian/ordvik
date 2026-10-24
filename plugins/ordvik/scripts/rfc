@@ -1,0 +1,329 @@
+#!/usr/bin/env python3
+"""Reserve RFC numbers and keep RFC indexes consistent.
+
+Parallel threads that each take "highest number + 1" collide, and every
+RFC PR that appends a row to its scope's README index conflicts with every
+other one. So an RFC starts with a reservation: a small PR that adds a stub
+file, the index row and the "Next number" bump, and nothing else. A
+workflow merges a valid reservation PR once its checks pass (.github/workflows/
+rfc-reservation.yml), so the number is taken on master before the RFC is
+written. The RFC's own PR then edits only its stub and its own row.
+
+A scope is a directory named rfcs that holds NNNN-<slug>.md files
+(docs/rfcs/ is the root scope, <project>/docs/rfcs/ a project scope). Its README.md holds the index: the
+first table whose header starts with "| RFC |", an optional
+"Next number: **NNNN**" line, and an optional "Number Collisions" table
+whose first column lists numbers that two files are known to share.
+
+Usage:
+  rfc next [--scope <dir>] [--min <n>]          Print the next free number
+  rfc reserve [--scope <dir>] [--min <n>] <slug> <title> [--author <name>] [--date <YYYY-MM-DD>]
+                                                Write the stub, row and Next number bump
+  rfc check                                     Check every scope (tier 1)
+  rfc verify-reservation <base> <head>          Is base...head exactly one valid reservation?
+
+reserve works on the working tree; start from a fresh origin/master. It
+prints the stub's path. --min raises the floor, for a scope whose
+numbering skips ahead (ordvik's numbering.next_min). verify-reservation prints "reservation NNNN" and
+exits 0 for a valid reservation, prints "not a reservation: <why>" and exits
+3 for a PR that isn't one, and prints the problem and exits 1 for a PR that
+looks like a reservation but is wrong.
+
+Exit status: 0, 1 on errors, 2 on bad usage, 3 as above.
+"""
+
+import datetime
+import os
+import re
+import subprocess
+import sys
+
+ROOT_SCOPE = "docs/rfcs"
+FILE_RE = re.compile(r"^(\d{3,4})-[a-z0-9][a-z0-9-]*\.md$")
+ROW_RE = re.compile(r"^\|\s*(\d{3,4})\s*\|")
+NEXT_RE = re.compile(r"^Next number: \*\*(\d{3,4})\*\*\s*$")
+STUB_NOTE = "Reserved. The RFC is written in its own pull request."
+STUB_MAX_LINES = 12
+
+
+def git(root, *args, check=True):
+    r = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        raise SystemExit(f"git {' '.join(args)}: {r.stderr.strip()}")
+    return r
+
+
+def repo_root():
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit("rfc: not inside a git repository")
+    return r.stdout.strip()
+
+
+class Tree:
+    """Files read from the working tree, or from a commit when ref is set."""
+
+    def __init__(self, root, ref=None):
+        self.root, self.ref = root, ref
+
+    def names(self, directory):
+        if self.ref:
+            r = git(self.root, "ls-tree", "--name-only", f"{self.ref}:{directory}", check=False)
+            return r.stdout.split() if r.returncode == 0 else []
+        path = os.path.join(self.root, directory)
+        return sorted(os.listdir(path)) if os.path.isdir(path) else []
+
+    def read(self, path):
+        if self.ref:
+            r = git(self.root, "show", f"{self.ref}:{path}", check=False)
+            return r.stdout if r.returncode == 0 else None
+        try:
+            with open(os.path.join(self.root, path), encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
+
+    def scopes(self):
+        args = ["ls-tree", "-r", "--name-only", self.ref] if self.ref else ["ls-files"]
+        found = set()
+        for p in git(self.root, *args).stdout.splitlines():
+            d = os.path.dirname(p)
+            if os.path.basename(d) == "rfcs" and FILE_RE.match(os.path.basename(p)):
+                found.add(d)
+        return sorted(found)
+
+
+class Index:
+    """A scope's README: its index rows, Next number line and collision list."""
+
+    def __init__(self, text):
+        self.lines = (text or "").splitlines()
+        self.rows = {}           # number -> line index of its index row
+        self.table_end = None    # line index just past the index table
+        self.columns = 0
+        self.next_line = None
+        self.next = None
+        self.collisions = set()
+        self._parse()
+
+    def _parse(self):
+        in_index = in_collisions = False
+        index_done = False
+        for i, line in enumerate(self.lines):
+            if line.startswith("#"):
+                in_collisions = "Number Collisions" in line
+            if not index_done and not in_index and re.match(r"^\|\s*RFC\s*\|", line):
+                in_index = True
+                self.columns = line.strip().strip("|").count("|") + 1
+                continue
+            if in_index:
+                if line.startswith("|"):
+                    m = ROW_RE.match(line)
+                    if m:
+                        self.rows.setdefault(int(m.group(1)), i)
+                    self.table_end = i + 1
+                    continue
+                in_index, index_done = False, True
+            m = NEXT_RE.match(line)
+            if m:
+                self.next_line, self.next = i, int(m.group(1))
+            if in_collisions:
+                m = ROW_RE.match(line)
+                if m:
+                    self.collisions.add(int(m.group(1)))
+
+    def text(self):
+        return "\n".join(self.lines) + "\n"
+
+
+def numbered_files(tree, scope):
+    out = {}
+    for name in tree.names(scope):
+        m = FILE_RE.match(name)
+        if m:
+            out.setdefault(int(m.group(1)), []).append(name)
+    return out
+
+
+def next_number(tree, scope, minimum=0):
+    files = numbered_files(tree, scope)
+    index = Index(tree.read(f"{scope}/README.md"))
+    taken = set(files) | set(index.rows)
+    n = max(taken, default=0) + 1
+    if index.next is not None:
+        n = max(n, index.next)
+    return max(n, minimum)
+
+
+def fmt(n):
+    return f"{n:04d}"
+
+
+def stub(n, title, author, date):
+    return (f"# RFC {fmt(n)}: {title}\n\n"
+            f"**Status**: draft\n**Author**: {author}\n**Date**: {date}\n\n"
+            f"{STUB_NOTE}\n")
+
+
+def index_row(n, title, filename, columns):
+    cells = [fmt(n), f"[{title}]({filename})", "draft"] + [""] * max(0, columns - 3)
+    return "|" + "|".join(f" {c} " if c else " " for c in cells) + "|"
+
+
+def cmd_next(root, scope, minimum):
+    print(fmt(next_number(Tree(root), scope, minimum)))
+    return 0
+
+
+def cmd_reserve(root, scope, slug, title, author, date, minimum):
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", slug):
+        print(f"rfc: slug {slug!r} must be lowercase letters, digits and dashes", file=sys.stderr)
+        return 2
+    if "|" in title or "\n" in title:
+        print("rfc: the title cannot contain | or a newline", file=sys.stderr)
+        return 2
+    tree = Tree(root)
+    n = next_number(tree, scope, minimum)
+    filename = f"{fmt(n)}-{slug}.md"
+    readme_path = os.path.join(root, scope, "README.md")
+    os.makedirs(os.path.join(root, scope), exist_ok=True)
+    with open(os.path.join(root, scope, filename), "w", encoding="utf-8") as f:
+        f.write(stub(n, title, author, date))
+    index = Index(tree.read(f"{scope}/README.md"))
+    if index.table_end is not None:
+        index.lines.insert(index.table_end, index_row(n, title, filename, index.columns))
+        if index.next_line is not None and index.next_line >= index.table_end:
+            index.next_line += 1
+        if index.next_line is not None:
+            index.lines[index.next_line] = f"Next number: **{fmt(n + 1)}**"
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(index.text())
+    print(os.path.join(scope, filename))
+    return 0
+
+
+def check_scope(tree, scope):
+    errors = []
+    files = numbered_files(tree, scope)
+    index = Index(tree.read(f"{scope}/README.md"))
+    for n, names in sorted(files.items()):
+        if len(names) > 1 and n not in index.collisions:
+            errors.append(f"{scope}: {fmt(n)} is used by {', '.join(names)}; renumber the newer one "
+                          f"(scripts/rfc next --scope {scope})")
+    if index.next is not None:
+        highest = max(set(files) | set(index.rows), default=0)
+        if index.next <= highest:
+            errors.append(f"{scope}/README.md: Next number is {fmt(index.next)} but {fmt(highest)} "
+                          f"is taken; set it to {fmt(highest + 1)}")
+    return errors
+
+
+def cmd_check(root):
+    tree = Tree(root)
+    errors = [e for scope in tree.scopes() for e in check_scope(tree, scope)]
+    for e in errors:
+        print(e, file=sys.stderr)
+    return 1 if errors else 0
+
+
+def changed_files(root, base, head):
+    out = git(root, "diff", "--name-status", "--no-renames", f"{base}...{head}").stdout
+    return [line.split("\t") for line in out.splitlines() if line]
+
+
+def diff_lines(root, base, head, path):
+    out = git(root, "diff", "-U0", f"{base}...{head}", "--", path).stdout
+    added = [l[1:] for l in out.splitlines() if l.startswith("+") and not l.startswith("+++")]
+    removed = [l[1:] for l in out.splitlines() if l.startswith("-") and not l.startswith("---")]
+    return added, removed
+
+
+def verify_reservation(root, base, head):
+    """(exit code, message) for the PR base...head."""
+    changes = changed_files(root, base, head)
+    added = [p for s, p in changes if s == "A" and FILE_RE.match(os.path.basename(p))
+             and os.path.basename(os.path.dirname(p)) == "rfcs"]
+    if len(added) != 1:
+        return 3, "not a reservation: it does not add exactly one RFC file"
+    path = added[0]
+    scope = os.path.dirname(path)
+    readme = f"{scope}/README.md"
+    others = [p for s, p in changes if p not in (path, readme)]
+    if others:
+        return 3, f"not a reservation: it also changes {', '.join(sorted(others)[:3])}"
+    n = int(FILE_RE.match(os.path.basename(path)).group(1))
+    text = Tree(root, head).read(path) or ""
+    lines = text.splitlines()
+    if len(lines) > STUB_MAX_LINES or STUB_NOTE not in text:
+        return 3, f"not a reservation: {path} is a written RFC, not a stub"
+
+    problems = []
+    if not lines or not lines[0].startswith(f"# RFC {fmt(n)}: "):
+        problems.append(f"{path}: the heading must be '# RFC {fmt(n)}: <title>'")
+    base_tree = Tree(root, base)
+    base_files = numbered_files(base_tree, scope)
+    base_index = Index(base_tree.read(readme))
+    if n in base_files or n in base_index.rows:
+        problems.append(f"{fmt(n)} is already taken on the base branch")
+    elif n < next_number(base_tree, scope):
+        problems.append(f"{fmt(n)} is below the base branch's next number "
+                        f"{fmt(next_number(base_tree, scope))}")
+    if base_index.table_end is not None:
+        plus, minus = diff_lines(root, base, head, readme)
+        rows = [l for l in plus if ROW_RE.match(l)]
+        if len(rows) != 1 or int(ROW_RE.match(rows[0]).group(1)) != n:
+            problems.append(f"{readme} must add exactly one index row, for {fmt(n)}")
+        want_minus = [] if base_index.next is None else [base_index.lines[base_index.next_line]]
+        want_plus = [] if base_index.next is None else [f"Next number: **{fmt(n + 1)}**"]
+        if minus != want_minus or sorted(set(plus) - set(rows)) != want_plus:
+            problems.append(f"{readme} may change only the new row and the Next number line "
+                            f"(to {fmt(n + 1)})")
+    if problems:
+        return 1, "; ".join(problems)
+    return 0, f"reservation {fmt(n)}"
+
+
+def cmd_verify(root, base, head):
+    code, msg = verify_reservation(root, base, head)
+    print(msg, file=sys.stdout if code in (0, 3) else sys.stderr)
+    return code
+
+
+def main(argv):
+    args = list(argv)
+    if not args or args[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0 if args else 2
+    cmd, rest = args[0], args[1:]
+    opts = {"--scope": ROOT_SCOPE, "--author": None, "--date": None, "--min": "0"}
+    pos = []
+    i = 0
+    while i < len(rest):
+        if rest[i] in opts and i + 1 < len(rest):
+            opts[rest[i]] = rest[i + 1]
+            i += 2
+        else:
+            pos.append(rest[i])
+            i += 1
+    root = repo_root()
+    scope = opts["--scope"].rstrip("/")
+    if not opts["--min"].isdigit():
+        print("rfc: --min takes a number", file=sys.stderr)
+        return 2
+    minimum = int(opts["--min"])
+    if cmd == "next" and not pos:
+        return cmd_next(root, scope, minimum)
+    if cmd == "reserve" and len(pos) == 2:
+        author = opts["--author"] or git(root, "config", "user.name", check=False).stdout.strip() or "fox"
+        date = opts["--date"] or datetime.date.today().isoformat()
+        return cmd_reserve(root, scope, pos[0], pos[1], author, date, minimum)
+    if cmd == "check" and not pos:
+        return cmd_check(root)
+    if cmd == "verify-reservation" and len(pos) == 2:
+        return cmd_verify(root, pos[0], pos[1])
+    print(__doc__, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

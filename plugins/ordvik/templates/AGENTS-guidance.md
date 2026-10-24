@@ -1,3 +1,13 @@
+## Development Process
+
+This repo follows ordvik's development process: goal, research, RFC, plan and dispatches, implement, PR, close. `/ordvik:process` has the whole of it, including when a change needs an RFC, what to ask the operator, how to drive a PR, and the flat-history rule. In short:
+
+- Ask the operator only to decide, review, approve a dry run, or do what needs their own hands. A list of commands for them to type is a missing command.
+- Merging an RFC's PR accepts it, unless the PR says the RFC is tabled.
+- New dispatch docs are named `YYYYMMDD-<slug>.md`; the name is the thread id.
+- Rebase onto the default branch, no merge commits; tidy your own branch's commits before review without asking.
+- A dispatch closes in its own PR. Large threads write a short retro; hard-won fixes get a TIL.
+
 ## Planning & Backlog
 
 This repo uses ordvik for planning. Key files live in `docs/planning/`:
@@ -5,6 +15,7 @@ This repo uses ordvik for planning. Key files live in `docs/planning/`:
 - **Backlog**: `docs/planning/backlog.md` — prioritized work items (P0–P2 + Done)
 - **Threads**: `docs/planning/threads.md` — active work threads with status
 - **Dispatch docs**: `docs/planning/dispatch/` — agent-executable work packages
+- **Operator asks**: `scripts/asks status` lists everything waiting on the operator. A human gate belongs in its dispatch doc, and a plan gate belongs in its plan. Only an ask with no other home gets a file in `docs/planning/asks/`. Mark a gate's task `— DONE` once the operator has done it.
 
 When the user says "add to backlog", "backlog this", or similar — they mean append an item to `docs/planning/backlog.md`, not save a memory or note. Read the file first to match the existing format and priority section.
 

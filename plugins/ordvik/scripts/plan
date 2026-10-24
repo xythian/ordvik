@@ -1,0 +1,516 @@
+#!/usr/bin/env python3
+"""Read a dispatch plan and say what can start.
+
+A plan (docs/planning/plans/<slug>.md) lists its threads and what each
+waits for, in YAML frontmatter. Everything else is read from git: a thread
+is done when its dispatch doc says `status: done`, and a task is done when
+its heading ends in `— DONE`, both as of the ref (default origin/HEAD, else
+origin/main or origin/master). Closing a dispatch happens in the thread's
+own PR, so "merged" and "done on origin/master" are the same.
+
+Status groups threads into stages computed from what they wait on: stage 1
+waits on no other thread, stage N on threads up to stage N-1. Stages are
+for reading; a thread launches as soon as its own conditions hold.
+
+Usage:
+  plan status <plan> [--ref <ref>] [--fetch] [--json]
+  plan ready <plan> [--ref <ref>] [--fetch]     Paths of launchable docs, one per line
+  plan check <plan> [--ref <ref>] [--fetch]     Validate the plan against the dispatch docs
+  plan check [--ref <ref>] [--fetch]            Only check that no two dispatch docs share a thread id
+
+<plan> is a path, or a slug under docs/planning/plans/ (or its archive/).
+The plan itself is read from the working tree, so an edited plan can be
+checked before it is committed; dispatch docs are read from the ref.
+
+A thread id is a dispatch doc's `thread:` field: a number for older docs
+("100"), or the doc's own name for new ones ("20261023-ops-tier-catalog",
+written YYYYMMDD-slug from the day the doc was written). Two docs in
+dispatch/ with the same id are an error, and an active doc that shares
+its id with an archived one is a warning.
+
+Wait conditions (`after:` on a thread):
+  "100"        thread 100 is done (its dispatch doc has status: done)
+  "100:2"      thread 100's Task 2 heading is marked — DONE (or 100 is done)
+  "gate:<id>"  the plan's gate <id> has `passed:` set
+
+Exit status: 0, or 1 when `check` finds errors or the plan cannot be read.
+"""
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import yaml
+
+PLANS_DIR = "docs/planning/plans"
+DISPATCH_DIR = "docs/planning/dispatch"
+TASK_HEADING = re.compile(r"^##\s+Task\s+(\d+)\b(.*)$", re.IGNORECASE)
+DONE_MARK = re.compile(r"[—-]\s*DONE\s*$")
+REF_FORM = re.compile(r"^(?:gate:[A-Za-z0-9._-]+|[0-9A-Za-z._-]+(?::\d+)?)$")
+PLAN_STATUSES = ("draft", "active", "done", "abandoned")
+
+
+def git(root, *args, check=True):
+    r = subprocess.run(["git", "-C", root, *args], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip()}")
+    return r
+
+
+def repo_root():
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit("Error: not inside a git repository.")
+    return r.stdout.strip()
+
+
+def split_frontmatter(text):
+    """(frontmatter dict, body) of a markdown doc; ({}, text) without one.
+    Raises yaml.YAMLError for frontmatter that is not valid YAML."""
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            return yaml.safe_load(text[4:end]) or {}, text[end + 5:]
+    return {}, text
+
+
+def loose_frontmatter(text):
+    """Top-level `key: value` pairs, for a doc whose frontmatter does not
+    parse: enough to place it in the plan while check reports the error."""
+    end = text.find("\n---\n", 4)
+    meta = {}
+    for line in text[4:end].split("\n"):
+        key, sep, value = line.partition(":")
+        if sep and key and not key[0].isspace() and not key.startswith("-"):
+            meta[key.strip()] = value.strip().strip('"') or None
+    return meta, text[end + 5:]
+
+
+def as_list(value):
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            value = yaml.safe_load(value)
+        except yaml.YAMLError:
+            return []
+        return value if isinstance(value, list) else []
+    return []
+
+
+def parse_doc(path, text):
+    yaml_error = None
+    try:
+        meta, body = split_frontmatter(text)
+    except yaml.YAMLError as e:
+        yaml_error = str(e).replace("\n", " ")
+        meta, body = loose_frontmatter(text)
+    title, tasks = None, {}
+    for line in body.split("\n"):
+        if title is None and line.startswith("# "):
+            title = line[2:].strip()
+        m = TASK_HEADING.match(line)
+        if m:
+            tasks[int(m.group(1))] = bool(DONE_MARK.search(m.group(2)))
+    return {
+        "path": path,
+        "thread": str(meta.get("thread", "")).strip(),
+        "branch": meta.get("branch"),
+        "executor": str(meta.get("executor", "")).lower(),
+        "status": str(meta.get("status") or "active").lower(),
+        "plan": meta.get("plan"),
+        "wave": meta.get("wave"),
+        "depends_on": [str(d) for d in as_list(meta.get("depends_on"))],
+        "title": title,
+        "tasks": tasks,
+        "archived": "/archive/" in path,
+        "yaml_error": yaml_error,
+    }
+
+
+def all_dispatch_docs(root, ref):
+    """Every dispatch doc on ref that names a thread, active and archived."""
+    r = git(root, "ls-tree", "-r", "--name-only", ref, "--", DISPATCH_DIR + "/")
+    found = []
+    for path in r.stdout.split():
+        if not path.endswith(".md"):
+            continue
+        rel = path[len(DISPATCH_DIR) + 1:]
+        if "/" in rel and not rel.startswith("archive/"):
+            continue
+        text = git(root, "show", f"{ref}:{path}").stdout
+        doc = parse_doc(path, text)
+        if doc["thread"]:
+            found.append(doc)
+    return found
+
+
+def index_docs(found):
+    """The docs keyed by thread id; an active doc wins over an archived one."""
+    docs = {}
+    for doc in found:
+        if doc["thread"] not in docs or docs[doc["thread"]]["archived"]:
+            docs[doc["thread"]] = doc
+    return docs
+
+
+def dispatch_docs(root, ref):
+    """Every dispatch doc on ref, active and archived, keyed by thread."""
+    return index_docs(all_dispatch_docs(root, ref))
+
+
+def check_ids(found):
+    """Two active docs with one id are an error; an active doc sharing its
+    id with an archived one is a warning. Archived docs alone are history."""
+    errors, warnings = [], []
+    by_id = {}
+    for doc in found:
+        by_id.setdefault(doc["thread"], []).append(doc)
+    for tid in sorted(by_id):
+        active = [d["path"] for d in by_id[tid] if not d["archived"]]
+        archived = [d["path"] for d in by_id[tid] if d["archived"]]
+        if len(active) > 1:
+            errors.append(f"thread {tid} is claimed by {len(active)} dispatch docs: {', '.join(active)}")
+        elif active and archived:
+            warnings.append(f"thread {tid}: {active[0]} shares its id with {', '.join(archived)}")
+    return errors, warnings
+
+
+def remote_branches(root):
+    r = git(root, "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin", check=False)
+    return {b[len("origin/"):] for b in r.stdout.split() if b.startswith("origin/")}
+
+
+def default_ref(root):
+    """The remote's default branch: origin/HEAD, else origin/main or origin/master."""
+    for ref in ("origin/HEAD", "origin/main", "origin/master"):
+        if git(root, "rev-parse", "--verify", "-q", ref, check=False).returncode == 0:
+            return ref
+    return "origin/master"
+
+
+def resolve_plan_path(root, arg):
+    if os.path.isfile(arg):
+        return os.path.abspath(arg)
+    for d in (PLANS_DIR, PLANS_DIR + "/archive"):
+        p = os.path.join(root, d, arg if arg.endswith(".md") else arg + ".md")
+        if os.path.isfile(p):
+            return p
+    sys.exit(f"Error: no plan {arg} (a path, or a slug under {PLANS_DIR}/).")
+
+
+def load_plan(path):
+    with open(path) as f:
+        meta, _ = split_frontmatter(f.read())
+    if not meta:
+        sys.exit(f"Error: {path} has no YAML frontmatter.")
+    threads = []
+    for t in meta.get("threads") or []:
+        t = dict(t)
+        t["id"] = str(t.get("id", "")).strip()
+        t["after"] = [str(a) for a in (t.get("after") or [])]
+        threads.append(t)
+    gates = {}
+    for g in meta.get("gates") or []:
+        gates[str(g.get("id"))] = dict(g)
+    return {
+        "path": path,
+        "slug": str(meta.get("plan") or os.path.splitext(os.path.basename(path))[0]),
+        "title": meta.get("title"),
+        "status": str(meta.get("status") or "active").lower(),
+        "conductor": meta.get("conductor"),
+        "threads": threads,
+        "gates": gates,
+    }
+
+
+def condition(ref, docs, gates):
+    """(satisfied, description) for one `after:` entry."""
+    if ref.startswith("gate:"):
+        g = gates.get(ref[5:])
+        if g is None:
+            return False, f"{ref} (no such gate)"
+        return bool(g.get("passed")), f"gate {ref[5:]}"
+    thread, _, task = ref.partition(":")
+    doc = docs.get(thread)
+    if doc is None:
+        return False, f"{ref} (no dispatch doc yet)"
+    if doc["status"] == "done":
+        return True, ref
+    if task:
+        return bool(doc["tasks"].get(int(task))), f"{thread} Task {task}"
+    return False, f"{thread}"
+
+
+def milestones(plan, thread):
+    """What other threads wait on in this one: {"Task N" or "done": [ids]}.
+    The thread's brief tells it to land these in their own PRs and tell
+    the conductor when each merges."""
+    out = {}
+    for t in plan["threads"]:
+        for a in t["after"]:
+            dep, _, task = a.partition(":")
+            if dep == thread and not a.startswith("gate:"):
+                out.setdefault(f"Task {task}" if task else "done", []).append(t["id"])
+    return out
+
+
+def stages(plan):
+    """Each thread's stage: 1 when it waits on no other thread, else one
+    more than the latest stage it waits on. Gates do not add a stage."""
+    deps = {t["id"]: {a.partition(":")[0] for a in t["after"] if not a.startswith("gate:")}
+            for t in plan["threads"]}
+    memo = {}
+
+    def stage(n, seen):
+        if n in memo:
+            return memo[n]
+        if n in seen:  # a cycle; check reports it
+            return 1
+        memo[n] = 1 + max((stage(d, seen | {n}) for d in deps.get(n, ()) if d in deps), default=0)
+        return memo[n]
+
+    return {n: stage(n, frozenset()) for n in deps}
+
+
+def evaluate(plan, docs, branches):
+    """Each plan thread with its state and what it waits on."""
+    out = []
+    stage_of = stages(plan)
+    for t in plan["threads"]:
+        doc = docs.get(t["id"])
+        waiting = [desc for ok, desc in (condition(a, docs, plan["gates"]) for a in t["after"]) if not ok]
+        entry = {
+            "id": t["id"],
+            "stage": stage_of[t["id"]],
+            "title": (doc or {}).get("title") or t.get("title") or "",
+            "doc": (doc or {}).get("path"),
+            "after": t["after"],
+            "waiting_on": waiting,
+            "tasks_done": sum((doc or {}).get("tasks", {}).values()),
+            "tasks": len((doc or {}).get("tasks", {})),
+        }
+        if t.get("dropped"):
+            state = "dropped"
+        elif doc is None and t.get("launched"):
+            state = "started"  # launched from a doc not yet on the ref
+        elif doc is None:
+            state = "write-doc" if not waiting else "planned"
+        elif doc["status"] == "done":
+            state = "done"
+        elif doc["status"] == "superseded":
+            state = "superseded"
+        elif waiting:
+            state = "blocked"
+        elif doc["executor"] == "human":
+            state = "human"
+        elif t.get("launched") or doc["branch"] in branches or entry["tasks_done"]:
+            state = "started"
+        else:
+            state = "ready"
+        entry["state"] = state
+        entry["milestones"] = milestones(plan, t["id"])
+        if t.get("launched"):
+            entry["launched"] = str(t["launched"])
+        out.append(entry)
+    return out
+
+
+def pending_gates(plan, threads):
+    """Gates not yet passed that some unfinished thread waits on."""
+    needed = {}
+    for t in threads:
+        if t["state"] in ("done", "superseded", "dropped"):
+            continue
+        for a in t["after"]:
+            if a.startswith("gate:") and a[5:] in plan["gates"] and not plan["gates"][a[5:]].get("passed"):
+                needed.setdefault(a[5:], []).append(t["id"])
+    return [{"id": gid, "ask": plan["gates"][gid].get("ask", ""), "unblocks": ids}
+            for gid, ids in needed.items()]
+
+
+def check(plan, docs):
+    """(errors, warnings) for the plan against the dispatch docs."""
+    errors, warnings = [], []
+    if plan["status"] not in PLAN_STATUSES:
+        errors.append(f"status {plan['status']!r} is not one of {', '.join(PLAN_STATUSES)}")
+    ids = [t["id"] for t in plan["threads"]]
+    for i in sorted({i for i in ids if ids.count(i) > 1}):
+        errors.append(f"thread {i} is listed more than once")
+    for t in plan["threads"]:
+        if not t["id"]:
+            errors.append("a thread entry has no id")
+            continue
+        if t.get("wave") is not None:
+            warnings.append(f"thread {t['id']}: plans have no waves (stages come from after); drop wave")
+        doc = docs.get(t["id"])
+        if doc is None and not t.get("title"):
+            errors.append(f"thread {t['id']} has no dispatch doc yet and no title")
+        for a in t["after"]:
+            if not REF_FORM.match(a):
+                errors.append(f"thread {t['id']}: after {a!r} is not THREAD, THREAD:TASK or gate:ID")
+                continue
+            if a.startswith("gate:"):
+                if a[5:] not in plan["gates"]:
+                    errors.append(f"thread {t['id']}: after {a} names no gate in the plan")
+                continue
+            dep, _, task = a.partition(":")
+            if dep not in ids:
+                errors.append(f"thread {t['id']}: after {a} names a thread not in the plan")
+            elif task and docs.get(dep) and int(task) not in docs[dep]["tasks"]:
+                errors.append(f"thread {t['id']}: after {a}, but {docs[dep]['path']} has no Task {task}")
+        if doc is None:
+            continue
+        if doc["yaml_error"]:
+            errors.append(f"{doc['path']}: frontmatter is not valid YAML ({doc['yaml_error']}); "
+                          f"wt launch cannot read it")
+        if doc["plan"] != plan["slug"]:
+            warnings.append(f"{doc['path']}: frontmatter plan is {doc['plan']!r}, expected {plan['slug']!r}")
+        if doc["wave"]:
+            warnings.append(f"{doc['path']}: has wave {doc['wave']}; plans have no waves, drop it")
+        if doc["depends_on"]:
+            planned = sorted({a.partition(":")[0] for a in t["after"] if not a.startswith("gate:")})
+            if sorted(set(doc["depends_on"])) != planned:
+                warnings.append(f"{doc['path']}: depends_on {doc['depends_on']} differs from the plan's "
+                                f"after {t['after']}; the plan wins, drop depends_on from the doc")
+    for doc in docs.values():
+        if doc["plan"] == plan["slug"] and doc["thread"] not in ids:
+            errors.append(f"{doc['path']} says plan {plan['slug']} but the plan does not list thread {doc['thread']}")
+    # Cycles, over thread-level edges.
+    graph = {t["id"]: {a.partition(":")[0] for a in t["after"] if not a.startswith("gate:")}
+             for t in plan["threads"]}
+    state = {}
+
+    def visit(n, stack):
+        state[n] = "visiting"
+        for m in graph.get(n, ()):
+            if state.get(m) == "visiting":
+                errors.append("cycle: " + " -> ".join(stack + [n, m]))
+            elif m in graph and m not in state:
+                visit(m, stack + [n])
+        state[n] = "done"
+
+    for n in graph:
+        if n not in state:
+            visit(n, [])
+    return errors, warnings
+
+
+def print_status(plan, threads, gates, ref, sha):
+    print(f"Plan {plan['slug']} ({plan['status']}) as of {ref} {sha[:12]}")
+    if plan["title"]:
+        print(f"  {plan['title']}")
+    if plan["conductor"]:
+        print(f"  conductor: {plan['conductor']}")
+    for n in sorted({t["stage"] for t in threads}):
+        print()
+        print(f"Stage {n}")
+        for t in (t for t in threads if t["stage"] == n):
+            progress = f"{t['tasks_done']}/{t['tasks']} tasks" if t["tasks"] else ""
+            line = f"  {t['id']:<5} {t['state']:<10} {progress:<11} {t['title']}"
+            print(line.rstrip())
+            if t["waiting_on"] and t["state"] in ("blocked", "planned"):
+                print(f"        waits on: {', '.join(t['waiting_on'])}")
+            if t["state"] in ("ready", "started", "blocked", "write-doc"):
+                for m, ids in t["milestones"].items():
+                    if m != "done":
+                        print(f"        {m} unblocks: {', '.join(ids)}")
+    sections = [
+        ("Launch now", [t for t in threads if t["state"] == "ready"], lambda t: f"{t['id']}  {t['doc']}"),
+        ("Write the dispatch doc", [t for t in threads if t["state"] == "write-doc"], lambda t: f"{t['id']}  {t['title']}"),
+        ("Human-executed, ready", [t for t in threads if t["state"] == "human"], lambda t: f"{t['id']}  {t['doc']}"),
+        ("Gates to ask the operator", gates, lambda g: f"{g['id']}: {g['ask']} (unblocks {', '.join(g['unblocks'])})"),
+    ]
+    for heading, items, fmt in sections:
+        if items:
+            print()
+            print(f"{heading}:")
+            for i in items:
+                print(f"  {fmt(i)}")
+    open_ = [t for t in threads if t["state"] not in ("done", "superseded", "dropped")]
+    if not open_:
+        print()
+        print("Every thread is done: close the plan.")
+
+
+def main(argv):
+    if len(argv) < 2 or argv[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0 if argv and argv[0] in ("-h", "--help", "help") else 1
+    cmd, rest = argv[0], argv[1:]
+    if cmd not in ("status", "ready", "check"):
+        print(f"Error: unknown command {cmd!r}.\n")
+        print(__doc__.strip())
+        return 1
+    ref, as_json, fetch, args = None, False, False, []
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--ref" and i + 1 < len(rest):
+            ref = rest[i + 1]
+            i += 2
+            continue
+        if rest[i] == "--json":
+            as_json = True
+        elif rest[i] == "--fetch":
+            fetch = True
+        else:
+            args.append(rest[i])
+        i += 1
+    if len(args) > 1 or (not args and cmd != "check"):
+        print("Error: name exactly one plan.")
+        return 1
+    root = repo_root()
+    if fetch:
+        git(root, "fetch", "-q", "origin")
+    ref = ref or default_ref(root)
+    try:
+        sha = git(root, "rev-parse", "--verify", ref + "^{commit}").stdout.strip()
+        found = all_dispatch_docs(root, ref)
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return 1
+    docs = index_docs(found)
+    if cmd == "check" and not args:
+        errors, warnings = check_ids(found)
+        for w in warnings:
+            print(f"warning: {w}")
+        for e in errors:
+            print(f"error: {e}")
+        if not errors:
+            print(f"{len(found)} dispatch docs, no shared thread ids.")
+        return 1 if errors else 0
+    plan = load_plan(resolve_plan_path(root, args[0]))
+
+    if cmd == "check":
+        errors, warnings = check(plan, docs)
+        id_errors, id_warnings = check_ids(found)
+        errors += id_errors
+        warnings += id_warnings
+        for w in warnings:
+            print(f"warning: {w}")
+        for e in errors:
+            print(f"error: {e}")
+        if not errors:
+            print(f"Plan {plan['slug']}: {len(plan['threads'])} threads, {len(plan['gates'])} gates, no errors.")
+        return 1 if errors else 0
+
+    threads = evaluate(plan, docs, remote_branches(root))
+    gates = pending_gates(plan, threads)
+    if cmd == "ready":
+        for t in threads:
+            if t["state"] == "ready":
+                print(t["doc"])
+        return 0
+    if as_json:
+        json.dump({"plan": plan["slug"], "status": plan["status"], "conductor": plan["conductor"],
+                   "ref": ref, "commit": sha, "threads": threads, "gates": gates}, sys.stdout, indent=2)
+        print()
+        return 0
+    print_status(plan, threads, gates, ref, sha)
+    return 0
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # quiet under `| head`
+    sys.exit(main(sys.argv[1:]))

@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Review completed work for a thread or wave. Runs automated validation, checks completion criteria, and performs cross-cutting consistency checks.
+description: Review completed work for a thread or a dispatch plan. Runs automated validation, checks completion criteria, and performs cross-cutting consistency checks.
 allowed_tools:
   - Read
   - Write
@@ -17,7 +17,7 @@ allowed_tools:
 
 # Verification Skill
 
-Reviews completed work for a thread or wave. Runs automated validation, checks completion criteria, and identifies cross-cutting consistency issues. Can be invoked manually or dispatched as an audit thread.
+Reviews completed work for a thread or a dispatch plan. Runs automated validation, checks completion criteria, and identifies cross-cutting consistency issues. Can be invoked manually or dispatched as an audit thread.
 
 ## Parsing Invocation
 
@@ -26,7 +26,7 @@ The user invokes as `/ordvik:verify <target>`.
 | Target | Description |
 |--------|-------------|
 | `<dispatch-doc>` | Verify a single thread's dispatch doc |
-| `--wave <N>` | Verify all threads in a wave |
+| `--plan <slug>` | Verify all finished threads in a dispatch plan |
 | `--branch <name>` | Verify work on a specific branch against its dispatch doc |
 
 ## Single Thread Verification
@@ -102,13 +102,13 @@ For a single dispatch doc:
 [PASS: ready for PR | NEEDS FIXES: list what | NEEDS REVIEW: list concerns]
 ```
 
-## Wave Verification
+## Plan Verification
 
-### Level 3: Wave-Level Audit
+### Level 3: Plan-Level Audit
 
-For a wave (`--wave N`):
+For a plan (`--plan <slug>`):
 
-1. **Identify all threads** — read dispatch docs for the wave.
+1. **Identify all threads** — `scripts/plan status <slug> --json`; audit the `done` ones (and `started` ones on request).
 
 2. **Run Level 2 for each thread** — individual thread verification.
 
@@ -125,10 +125,10 @@ For a wave (`--wave N`):
    - Check that types match at boundaries
    - Verify error propagation across service boundaries
 
-5. **Generate wave audit report**:
+5. **Generate plan audit report**:
 
 ```markdown
-# Wave NNN Audit
+# Plan <slug> Audit
 
 **Date**: YYYY-MM-DD
 **Threads audited**: [list]

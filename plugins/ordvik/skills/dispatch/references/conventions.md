@@ -12,22 +12,22 @@ active  →  done
 ```
 
 - **`active`** — Work is in progress or pending. This is the default; the field can be omitted and missing `status` is treated as `active`.
-- **`done`** — All tasks completed, PR merged, completion criteria verified. Set via the `close` operation.
+- **`done`** — All tasks completed and completion criteria verified. Set via the `close` operation in a last commit of the thread's own PR, so merging that PR is what makes the thread done on the default branch.
 - **`superseded`** — Replaced by a newer dispatch doc. Set via `close --superseded-by <ref>`.
 
 When superseding a dispatch doc, two fields are added:
 
 ```yaml
 status: superseded
-superseded_by: "WWW-TTT-new-slug"
+superseded_by: "20261023-new-slug"
 ```
 
 And a blockquote is inserted immediately after the title heading:
 
 ```markdown
-# Thread TTT: Original Title
+# Thread <id>: Original Title
 
-> **Superseded** by [WWW-TTT-new-slug](./WWW-TTT-new-slug.md). This document is retained for historical context.
+> **Superseded** by [20261023-new-slug](./20261023-new-slug.md). This document is retained for historical context.
 ```
 
 ## Task Completion Markers
@@ -63,27 +63,32 @@ Markers are part of the heading text and survive the `— DONE` append:
 
 The `human_gates` frontmatter field lists Human Gate tasks. Audit and Contract tasks do not have a corresponding frontmatter field — they are identified by heading markers only.
 
-## Wave Grouping
+## Plans, Not Waves
 
-Waves are batches of concurrent dispatch threads. Conventions:
+Waves (numbered batches launched together) are retired. Work that spans
+more than one round of threads gets a plan in `docs/planning/plans/` (see
+`plans.md` beside this file): the plan owns ordering, a thread launches as
+soon as what it waits on has merged, and `scripts/plan status` groups
+threads into stages computed from those waits.
 
-- **3-digit zero-padded numbers** — `001`, `002`, `003`
-- **Concurrent independent threads** — Threads within a wave can execute in parallel
-- **Standalone threads omit wave** — If work isn't part of a batch, omit the wave prefix from both the filename and frontmatter
-- **Wave numbering is global** to the project, not per-thread
-
-Filename pattern:
-- With wave: `WWW-TTT-slug.md` (e.g., `003-015-add-auth.md`)
-- Without wave: `TTT-slug.md` (e.g., `015-add-auth.md`)
+- **No `wave` field and no wave prefix** on new dispatch docs. Filename
+  pattern: `YYYYMMDD-slug.md` (e.g., `20261023-add-auth.md`), and the
+  name is the thread id. Older `TTT-slug.md` and `WWW-TTT-slug.md`
+  docs keep their names.
+- **Threads in a plan** carry `plan: <slug>` and no `depends_on`.
+- **Standalone threads** (no plan) are unchanged: no `plan`, optional
+  `depends_on`.
 
 ## Retro Format
 
-Wave retrospectives use the template defined in the planning skill (`/ordvik:planning wave-close`). That template is the single source of truth for retro structure.
-
-Key points:
-- Retros live in `docs/planning/dispatch/` while the wave is active (e.g., `wave-003-retro.md`)
-- After wave close-out, retros are archived along with all wave dispatch docs
-- Retros are written as part of wave close-out, not thread close-out
+Retros are written when a plan closes, in the plan's own **Retro** section,
+using the template in the planning skill (`/ordvik:planning plan-close`).
+A conductor may also write a short retro at an operator gate that ends a
+phase. A large standalone thread (not in a plan, about five or more tasks,
+or a week or more of work) gets a short retro too, in a `## Retro` section
+of its dispatch doc, written in the closing commit. Small threads skip it.
+A fix that took several failed attempts gets a TIL instead (or as well),
+wherever the repo keeps them.
 
 ## Close-Out Checklist
 
@@ -92,7 +97,7 @@ Key points:
 Before closing a dispatch thread (`/ordvik:dispatch close <file>`):
 
 - [ ] All tasks marked `— DONE`
-- [ ] PR merged (or work landed on target branch)
+- [ ] Closing in the thread's own PR, as its last commit (not a follow-up PR)
 - [ ] `status` set to `done` (or `superseded` with `superseded_by`)
 - [ ] All completion criteria checked off
 - [ ] Backlog updated — completed items marked done, follow-on items added if needed
@@ -100,13 +105,13 @@ Before closing a dispatch thread (`/ordvik:dispatch close <file>`):
 - [ ] Audit tasks (if any) were executed and passed
 - [ ] Contract tests (if any) still pass without modification to contract files
 
-### Wave-Level Close-Out
+### Plan-Level Close-Out
 
-Before closing a wave (`/ordvik:planning wave-close <N>`):
+Before closing a plan (`/ordvik:planning plan-close <slug>`):
 
-- [ ] All threads in the wave closed (status `done` or `superseded`)
-- [ ] Wave retro written
-- [ ] All wave dispatch docs + retro archived to `archive/`
+- [ ] `scripts/plan status <slug>` shows every thread `done`, `superseded` or `dropped`
+- [ ] Retro written in the plan
+- [ ] Plan set to `status: done` and moved to `docs/planning/plans/archive/`
 - [ ] Backlog updated with follow-on items from retro
 - [ ] Thread registry updated if thread statuses changed
 
@@ -118,17 +123,14 @@ Completed dispatch docs are archived to preserve the dispatch folder as a clean 
 
 **Rules**:
 - Files keep their original names when archived
-- `done` threads are archived after the wave retro is written (so they're available during retro)
-- `superseded` threads are archived immediately (no need to wait for retro)
+- `done` and `superseded` threads are archived immediately, preferably in the thread's own PR (`scripts/plan` finds archived docs by their `thread:` field, so plans need no edit)
 - The `list` operation excludes `archive/` by default — use `--archived` to include them
-- Standalone (non-wave) threads that are closed as `done` archive immediately since there's no wave retro to wait for
 
 ## Folder as Work Queue
 
 The `docs/planning/dispatch/` directory should contain only **active work**:
 
 - **Active dispatch docs** — threads with work in progress (`status: active` or missing)
-- **Pending dispatch docs** — threads not yet started but planned for the current or next wave
-- **Current-wave retros** — retros for waves that haven't completed close-out yet
+- **Pending dispatch docs** — threads written but not yet launched (in a plan, `blocked` or `ready`)
 
 Everything else belongs in `archive/`. This convention makes the dispatch folder a scannable work queue — if it's in the folder, it needs attention.
