@@ -27,7 +27,7 @@ API surfaces grow organically and accumulate inconsistencies — different namin
 - Environment variables: enumerate all env vars the codebase reads
 
 **Deliverables**:
-- `docs/planning/gardening/YYYY-MM-DD-api-consistency.md` with the inventory
+- `<planning>/gardening/YYYY-MM-DD-api-consistency.md` with the inventory
 
 ---
 

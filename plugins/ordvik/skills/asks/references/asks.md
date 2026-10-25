@@ -1,5 +1,7 @@
 # Operator asks
 
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
+
 Much of the work here waits on one person. An RFC needs accepting, a PR
 needs merging, a tailnet grant needs adding, a restore drill needs running
 in production, a decision card sits unanswered in a project thread. Each of
@@ -52,7 +54,7 @@ work becomes visible.
 | Dispatch docs | An entry in `human_gates` whose `## Task N` heading is not marked `— DONE`, in an unarchived doc that is not `done` or `superseded` | The ref (`origin/master`) |
 | Plans | A gate without `passed:` that an unfinished thread waits on | The working tree |
 | RFCs | Status `considering`, under any `docs/rfcs/` in the repo | The ref |
-| Ask files | A file in `docs/planning/asks/` with no `answered:` | The working tree |
+| Ask files | A file in `<planning>/asks/` with no `answered:` | The working tree |
 | Open PRs | Waiting on the operator's review or merge | The sweep (GitHub) |
 | Agent threads | Blocked on the operator, or holding an open decision card | The sweep |
 
@@ -69,7 +71,7 @@ need someone to look, so the gate stays on the list.
 
 An ask with no doc to live in, such as files only the operator has, a
 choice recorded only in a backlog note, or a grant a thread found it needs,
-gets one file in `docs/planning/asks/<slug>.md`:
+gets one file in `<planning>/asks/<slug>.md`:
 
 ```yaml
 ---
@@ -88,7 +90,7 @@ Context: what is needed, why, and links to the thread, PR or doc.
 When it is answered, add `answered:` (a date), `outcome:` (`done`,
 `decided`, `rejected`, `automate` or `dropped`) and `answer:` (one line,
 with a link to whatever records the result), and `git mv` it to
-`docs/planning/asks/archive/`. For `automate`, the answer names the
+`<planning>/asks/archive/`. For `automate`, the answer names the
 backlog item or dispatch that will build the command.
 
 Ask files come from whoever finds the ask: a thread that needs something

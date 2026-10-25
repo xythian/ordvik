@@ -1,6 +1,6 @@
 ---
 name: init
-description: Bootstrap ordvik planning structure in a repo. Creates .ordvik.yml, docs/rfcs/, docs/planning/, and convention files. Safe to run on already-initialized repos.
+description: Bootstrap ordvik planning structure in a repo. Creates .ordvik.yml, docs/rfcs/, <planning>/, and convention files. Safe to run on already-initialized repos.
 allowed_tools:
   - Read
   - Write
@@ -13,6 +13,8 @@ allowed_tools:
 ---
 
 # Init Skill
+
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
 
 Bootstraps a repo for ordvik. Creates the planning structure, scope registry, and convention files. Idempotent — running on an already-initialized repo skips existing files and reports what's already set up.
 
@@ -36,10 +38,10 @@ Check for each of these and report what already exists:
 - `docs/rfcs/` — RFC directory
 - `docs/rfcs/conventions.md` — project-local RFC conventions
 - `docs/research/` — research documents
-- `docs/planning/` — planning structure
-- `docs/planning/threads.md` — thread registry
-- `docs/planning/backlog.md` — backlog
-- `docs/planning/dispatch/` — dispatch doc directory
+- `<planning>/` — planning structure
+- `<planning>/threads.md` — thread registry
+- `<planning>/backlog.md` — backlog
+- `<planning>/dispatch/` — dispatch doc directory
 - `CLAUDE.md` or `AGENTS.md` — agent guidance
 
 Report a summary: "Found: X, Y, Z. Missing: A, B, C."
@@ -115,10 +117,10 @@ For each item below, create only if it doesn't already exist:
 - `docs/research/` directory
 
 **Planning layer** — ask: "Do you want to set up the planning structure (threads, backlog, dispatch docs)?" Default yes.
-- `docs/planning/` directory
-- `docs/planning/dispatch/` directory
-- `docs/planning/threads.md` from template (see below)
-- `docs/planning/backlog.md` from template (see below)
+- `<planning>/` directory
+- `<planning>/dispatch/` directory
+- `<planning>/threads.md` from template (see below)
+- `<planning>/backlog.md` from template (see below)
 
 **Multi-scope only:**
 - `<scope>/docs/rfcs/` for each declared scope
@@ -173,7 +175,7 @@ If yes, copy `${CLAUDE_PLUGIN_ROOT}/scripts/wt` to `scripts/wt` in the repo and 
 
 Skip if `scripts/wt` already exists. Note the `pyyaml` dependency (needed for parsing dispatch doc frontmatter).
 
-In the same step, offer `scripts/plan` (copy `${CLAUDE_PLUGIN_ROOT}/scripts/plan`, make it executable): it reads a dispatch plan in `docs/planning/plans/` and says which dispatch docs can launch now. Also offer `scripts/asks` (same way; it imports `scripts/plan`): it lists everything waiting on the operator (see `/ordvik:asks`). With it, create `docs/planning/asks/` and `docs/planning/asks/archive/` (with a `.gitkeep`). Skip any that already exist.
+In the same step, offer `scripts/plan` (copy `${CLAUDE_PLUGIN_ROOT}/scripts/plan`, make it executable): it reads a dispatch plan in `<planning>/plans/` and says which dispatch docs can launch now. Also offer `scripts/asks` (same way; it imports `scripts/plan`): it lists everything waiting on the operator (see `/ordvik:asks`). With it, create `<planning>/asks/` and `<planning>/asks/archive/` (with a `.gitkeep`). Skip any that already exist.
 
 If the repo has RFCs and is on GitHub, also offer RFC number reservation: copy `${CLAUDE_PLUGIN_ROOT}/scripts/rfc` to `scripts/rfc` (executable) and `${CLAUDE_PLUGIN_ROOT}/templates/workflows/rfc-reservation.yml` to `.github/workflows/rfc-reservation.yml`, and suggest adding `python3 scripts/rfc check` to the test suite. Set the workflow's `workflow_run.workflows` to the names of every workflow behind a required status check (the template says `ci`): it tries the merge as each finishes, and the last one's run succeeds. It merges with a token from a dedicated GitHub App, so a ruleset that restricts updates or requires approval can let only that App through. Walk the user through: create a private GitHub App with Contents and Pull requests read and write and no webhook, install it on this repo only, add it to the default branch ruleset's bypass list ("For pull requests only"), and create an environment `rfc-reservation` limited to the default branch holding variable `RFC_APP_ID` and secret `RFC_APP_PRIVATE_KEY`. Skip each file that already exists.
 
@@ -194,8 +196,8 @@ Template files are in `${CLAUDE_PLUGIN_ROOT}/templates/`:
 
 | Template | Target Path | Description |
 |----------|-------------|-------------|
-| `threads.md` | `docs/planning/threads.md` | Thread registry with status definitions |
-| `backlog.md` | `docs/planning/backlog.md` | Prioritized backlog (P0-P2 + Done) |
+| `threads.md` | `<planning>/threads.md` | Thread registry with status definitions |
+| `backlog.md` | `<planning>/backlog.md` | Prioritized backlog (P0-P2 + Done) |
 | `AGENTS-guidance.md` | Appended to `CLAUDE.md` | Development process summary, codebase exploration and build/test guidance |
 | `workflows/rfc-reservation.yml` | `.github/workflows/rfc-reservation.yml` | Merges RFC number reservation PRs once CI passes on them |
 

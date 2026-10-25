@@ -39,6 +39,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 import yaml
 
@@ -521,6 +522,22 @@ def main(argv):
     return 0
 
 
+def planning_repo():
+    """The planning repository .ordvik.yml names, or None: then
+    this repository's docs/planning/ is read here."""
+    try:
+        root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+        with open(os.path.join(root, ".ordvik.yml")) as f:
+            return ((yaml.safe_load(f) or {}).get("planning") or {}).get("repo")
+    except (OSError, subprocess.CalledProcessError, yaml.YAMLError, AttributeError):
+        return None
+
+
 if __name__ == "__main__":
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # quiet under `| head`
+    if planning_repo():
+        # Planning lives in its own repository: ordvik's CLI reads it.
+        wrapper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ordvik")
+        os.execv(wrapper, [wrapper, "asks", *sys.argv[1:]])
     sys.exit(main(sys.argv[1:]))

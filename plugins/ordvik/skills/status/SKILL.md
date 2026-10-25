@@ -71,7 +71,7 @@ Determine output destination by checking (in order):
 3. Default: `local`
 
 **Local mode** (default):
-- Write to `docs/status/YYYY-MM-DD-status.md`
+- Write to `docs/status/YYYY-MM-DD-status.md`, or `projects/<project>/status/` in the planning repository when `.ordvik.yml` names one
 - If the file exists, append the new entry with a blank line separator
 - Create `docs/status/` if it doesn't exist
 

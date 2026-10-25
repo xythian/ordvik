@@ -1,6 +1,8 @@
 # Dispatch Conventions — Default
 
-Plugin default conventions. Projects customize by creating `docs/planning/conventions.md` which takes precedence over this file.
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
+
+Plugin default conventions. Projects customize by creating `<planning>/conventions.md` which takes precedence over this file.
 
 ## Status Lifecycle
 
@@ -66,7 +68,7 @@ The `human_gates` frontmatter field lists Human Gate tasks. Audit and Contract t
 ## Plans, Not Waves
 
 Waves (numbered batches launched together) are retired. Work that spans
-more than one round of threads gets a plan in `docs/planning/plans/` (see
+more than one round of threads gets a plan in `<planning>/plans/` (see
 `plans.md` beside this file): the plan owns ordering, a thread launches as
 soon as what it waits on has merged, and `scripts/plan status` groups
 threads into stages computed from those waits.
@@ -111,7 +113,7 @@ Before closing a plan (`/ordvik:planning plan-close <slug>`):
 
 - [ ] `scripts/plan status <slug>` shows every thread `done`, `superseded` or `dropped`
 - [ ] Retro written in the plan
-- [ ] Plan set to `status: done` and moved to `docs/planning/plans/archive/`
+- [ ] Plan set to `status: done` and moved to `<planning>/plans/archive/`
 - [ ] Backlog updated with follow-on items from retro
 - [ ] Thread registry updated if thread statuses changed
 
@@ -119,7 +121,7 @@ Before closing a plan (`/ordvik:planning plan-close <slug>`):
 
 Completed dispatch docs are archived to preserve the dispatch folder as a clean work queue.
 
-**Archive location**: `docs/planning/dispatch/archive/`
+**Archive location**: `<planning>/dispatch/archive/`
 
 **Rules**:
 - Files keep their original names when archived
@@ -128,7 +130,7 @@ Completed dispatch docs are archived to preserve the dispatch folder as a clean 
 
 ## Folder as Work Queue
 
-The `docs/planning/dispatch/` directory should contain only **active work**:
+The `<planning>/dispatch/` directory should contain only **active work**:
 
 - **Active dispatch docs** — threads with work in progress (`status: active` or missing)
 - **Pending dispatch docs** — threads written but not yet launched (in a plan, `blocked` or `ready`)

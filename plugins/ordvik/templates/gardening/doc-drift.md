@@ -26,7 +26,7 @@ Documentation rots when code changes but docs don't. This survey cross-reference
 - Check for design docs that reference RFCs — verify the RFC status is consistent
 
 **Deliverables**:
-- Findings in `docs/planning/gardening/YYYY-MM-DD-doc-drift.md`
+- Findings in `<planning>/gardening/YYYY-MM-DD-doc-drift.md`
 
 ---
 

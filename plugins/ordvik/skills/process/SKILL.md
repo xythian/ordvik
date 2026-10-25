@@ -9,6 +9,8 @@ allowed_tools:
 
 # Development Process
 
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
+
 How work moves from an idea to merged code in a repo that uses ordvik. The
 other skills hold the formats (`/ordvik:rfc`, `/ordvik:dispatch`,
 `/ordvik:planning`, `/ordvik:asks`); this one says when each is used, who
@@ -105,7 +107,7 @@ completion criteria, and human gates worded as above.
   `scripts/plan check` fails when two active docs share an id.
 - **One thread or a plan.** Work that fits one round of threads is one or
   more standalone dispatches. Work that spans several rounds gets a plan
-  (`docs/planning/plans/<slug>.md`, see `/ordvik:dispatch` and its
+  (`<planning>/plans/<slug>.md`, see `/ordvik:dispatch` and its
   `references/plans.md`): its threads, what each waits on, its gates and a
   log. A thread launches as soon as what it waits on has merged.
 - **A plan has one conductor.** One agent session owns the plan until it

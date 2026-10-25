@@ -26,7 +26,7 @@ Find TODOs, stubs, skipped tests, and pre-existing failures. This survey produce
 - Find tests marked with skip/pending — flag those without an explanation or with references to issues that may be resolved
 
 **Deliverables**:
-- `docs/planning/gardening/YYYY-MM-DD-unfinished-work.md` with categorized findings
+- `<planning>/gardening/YYYY-MM-DD-unfinished-work.md` with categorized findings
 
 **Automated validation**: Report file exists and is non-empty.
 
@@ -48,7 +48,7 @@ Find TODOs, stubs, skipped tests, and pre-existing failures. This survey produce
   - **backlog** — needs its own dispatch, add to backlog
   - **investigate** — unclear if it's a real problem
 - Fix-now items fixed in this PR
-- Backlog items added to `docs/planning/backlog.md` at P2
+- Backlog items added to `<planning>/backlog.md` at P2
 
 **Automated validation**: `./scripts/test.sh full` and `./scripts/build.sh` pass (after fix-now items).
 
@@ -59,5 +59,5 @@ Find TODOs, stubs, skipped tests, and pre-existing failures. This survey produce
 **Scope**: Create backlog entries for actionable findings from both tasks.
 
 **Deliverables**:
-- Add items to `docs/planning/backlog.md` at P2/P3
+- Add items to `<planning>/backlog.md` at P2/P3
 - Reference the survey report as the source

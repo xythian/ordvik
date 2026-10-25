@@ -26,6 +26,27 @@ claude plugin install ordvik
 
 Skills are invoked as `/ordvik:rfc`, `/ordvik:dispatch`, `/ordvik:status`, etc.
 
+### The `ordvik` CLI
+
+The planning tools are a Go command, `ordvik planning`, over the planning
+library in `planning/`. It reads dispatch docs, plans and asks
+from a code repository's `docs/planning/`, or from the planning repository
+with a directory per project:
+
+```bash
+go install github.com/xythian/ordvik/cmd/ordvik@latest
+
+ordvik planning status <project>/<plan> [--json]   # threads by stage, what to do next
+ordvik planning ready <project>/<plan>             # dispatch docs to launch now
+ordvik planning check [<plan>]                     # validate plans, dispatch ids, projects
+ordvik planning asks [--json] [--project <p>]      # what waits on the operator
+ordvik planning projects                           # projects and their repositories
+```
+
+`ordvik plan ...` and `ordvik asks ...` take the same arguments and print
+the same output as `scripts/plan` and `scripts/asks`, whose own tests
+(`tests/contract/`) run against the Go command in `go test`.
+
 ## Skills
 
 | Skill | Description | Layer |

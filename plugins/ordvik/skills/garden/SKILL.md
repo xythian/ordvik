@@ -16,6 +16,8 @@ allowed_tools:
 
 # Gardening Skill
 
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
+
 Gardening is recurring, discovery-oriented work — agents dispatched to survey the codebase and identify work that needs doing. The primary output is information (findings reports and backlog items), not code changes.
 
 ## Parsing Invocation
@@ -51,7 +53,7 @@ Template files are in `${CLAUDE_PLUGIN_ROOT}/templates/gardening/`. Each is a co
    - Focus areas: any known problem spots to emphasize?
    - Depth: quick scan or thorough investigation?
 
-2. **Generate dispatch doc** — Create a gardening dispatch doc at `docs/planning/dispatch/` following these conventions:
+2. **Generate dispatch doc** — Create a gardening dispatch doc at `<planning>/dispatch/` following these conventions:
 
    **Frontmatter:**
    ```yaml
@@ -65,11 +67,11 @@ Template files are in `${CLAUDE_PLUGIN_ROOT}/templates/gardening/`. Each is a co
 
    **Branch naming:** `gardening/<template>-YYYY-MM-DD` — date-stamped because gardening is periodic.
 
-   **Output location:** Findings go to `docs/planning/gardening/` — create if it doesn't exist.
+   **Output location:** Findings go to `<planning>/gardening/` — create if it doesn't exist.
 
    **Task structure:** Each template has two standard tasks:
 
-   - **Task 1: Survey** — scan the codebase using the template's methodology. Write findings to `docs/planning/gardening/YYYY-MM-DD-<template>.md`. Categorize each finding:
+   - **Task 1: Survey** — scan the codebase using the template's methodology. Write findings to `<planning>/gardening/YYYY-MM-DD-<template>.md`. Categorize each finding:
      - **fix-now** — trivial, include in this PR
      - **backlog** — needs its own dispatch, add to backlog
      - **investigate** — unclear, needs human judgment
@@ -139,7 +141,7 @@ Survey methodology:
 
 `/ordvik:garden review`
 
-1. Read all files in `docs/planning/gardening/`
+1. Read all files in `<planning>/gardening/`
 2. Compare findings across time — are the same issues recurring?
 3. Track trends: is the codebase getting cleaner or dirtier?
 4. Identify patterns: which types of issues keep appearing?
@@ -149,4 +151,4 @@ Survey methodology:
 
 - **Survey and report, don't fix.** Fixes go through the normal dispatch pipeline. Exception: trivial fixes (typos, unused imports) can be included in the gardening PR, clearly separated from findings.
 - **Frequency is operator-driven.** Gardening runs are dispatched when there's capacity or suspected drift, not on a schedule. The planning skill can suggest gardening runs during gaps between waves.
-- **Findings accumulate.** The `docs/planning/gardening/` directory is an input for planning sessions. Past surveys inform future priorities.
+- **Findings accumulate.** The `<planning>/gardening/` directory is an input for planning sessions. Past surveys inform future priorities.

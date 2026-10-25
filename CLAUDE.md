@@ -30,7 +30,9 @@ ordvik/
 │           ├── planning/SKILL.md
 │           ├── verify/SKILL.md
 │           └── garden/SKILL.md
-│       └── backlog.md
+├── cmd/ordvik/                   # the ordvik CLI (`ordvik planning ...`)
+├── planning/                     # Go library over planning data
+├── tests/contract/               # scripts/plan and scripts/asks tests, run against the CLI
 ├── CLAUDE.md
 └── README.md
 ```

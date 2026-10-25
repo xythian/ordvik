@@ -33,7 +33,7 @@ Dependencies drift over time. This survey identifies what needs attention before
   - Node: `npm audit`
 
 **Deliverables**:
-- `docs/planning/gardening/YYYY-MM-DD-dependency-health.md` with findings categorized:
+- `<planning>/gardening/YYYY-MM-DD-dependency-health.md` with findings categorized:
   - **update-now** — patch/minor version bump, low risk
   - **plan-update** — major version bump or API changes, needs dispatch
   - **security** — known vulnerability, prioritize

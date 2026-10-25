@@ -27,7 +27,7 @@ Scan for repeated patterns that could be shared abstractions. This is discovery 
 - Look for inconsistent naming conventions across packages (same concept, different names)
 
 **Deliverables**:
-- `docs/planning/gardening/YYYY-MM-DD-refactoring-survey.md` with findings, each tagged as:
+- `<planning>/gardening/YYYY-MM-DD-refactoring-survey.md` with findings, each tagged as:
   - **consolidate** — clear candidate for shared abstraction
   - **investigate** — might be worth consolidating, needs human judgment
   - **intentional** — looks duplicated but has good reasons to stay separate
@@ -41,5 +41,5 @@ Scan for repeated patterns that could be shared abstractions. This is discovery 
 **Scope**: Create backlog entries for actionable findings.
 
 **Deliverables**:
-- Add items to `docs/planning/backlog.md` at P2/P3 for each **consolidate** finding
+- Add items to `<planning>/backlog.md` at P2/P3 for each **consolidate** finding
 - Reference the survey report as the source

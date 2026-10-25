@@ -6,18 +6,20 @@ This repo follows ordvik's development process: goal, research, RFC, plan and di
 - Merging an RFC's PR accepts it, unless the PR says the RFC is tabled.
 - New dispatch docs are named `YYYYMMDD-<slug>.md`; the name is the thread id.
 - Rebase onto the default branch, no merge commits; tidy your own branch's commits before review without asking.
-- A dispatch closes in its own PR. Large threads write a short retro; hard-won fixes get a TIL.
+- A dispatch closes in its own PR (in a planning repository, a commit there once the PR merges). Large threads write a short retro; hard-won fixes get a TIL.
 
 ## Planning & Backlog
 
-This repo uses ordvik for planning. Key files live in `docs/planning/`:
+This repo uses ordvik for planning. Key files live in `<planning>/`.
 
-- **Backlog**: `docs/planning/backlog.md` — prioritized work items (P0–P2 + Done)
-- **Threads**: `docs/planning/threads.md` — active work threads with status
-- **Dispatch docs**: `docs/planning/dispatch/` — agent-executable work packages
-- **Operator asks**: `scripts/asks status` lists everything waiting on the operator. A human gate belongs in its dispatch doc, and a plan gate belongs in its plan. Only an ask with no other home gets a file in `docs/planning/asks/`. Mark a gate's task `— DONE` once the operator has done it.
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
 
-When the user says "add to backlog", "backlog this", or similar — they mean append an item to `docs/planning/backlog.md`, not save a memory or note. Read the file first to match the existing format and priority section.
+- **Backlog**: `<planning>/backlog/` (or `backlog.md`) — prioritized work items
+- **Threads**: `<planning>/threads/` (or `threads.md`) — work threads with status
+- **Dispatch docs**: `<planning>/dispatch/` — agent-executable work packages
+- **Operator asks**: `scripts/asks status` lists everything waiting on the operator. A human gate belongs in its dispatch doc, and a plan gate belongs in its plan. Only an ask with no other home gets a file in `<planning>/asks/`. Mark a gate's task `— DONE` once the operator has done it.
+
+When the user says "add to backlog", "backlog this", or similar — they mean add an item to `<planning>/backlog/` (or `backlog.md`), not save a memory or note. Read the file first to match the existing format and priority section.
 
 ## Codebase Exploration
 

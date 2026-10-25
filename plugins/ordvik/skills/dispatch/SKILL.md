@@ -14,15 +14,17 @@ allowed_tools:
 
 # Dispatch Document Skill
 
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
+
 Creates and manages dispatch documents — structured work definitions that can be consumed by launch scripts to spin up agent worktrees automatically.
 
-This skill is part of the **planning layer** — it activates when `docs/planning/` exists. It reads `docs/planning/threads.md` and `docs/planning/backlog.md` for context when available, but gracefully degrades if they don't exist.
+This skill is part of the **planning layer** — it activates when `<planning>/` exists. It reads `<planning>/threads.md` and `<planning>/backlog.md` for context when available, but gracefully degrades if they don't exist.
 
 ## Convention File Resolution
 
 For dispatch-specific conventions, resolve in this order:
 
-1. **Project-local**: `docs/planning/conventions.md`
+1. **Project-local**: `<planning>/conventions.md`
 2. **Plugin default**: `${CLAUDE_SKILL_DIR}/references/conventions.md`
 
 The dispatch format specification (YAML frontmatter, task structure, human gates) is canonical in this skill — it's part of the planning model, not project-specific configuration.
@@ -47,7 +49,7 @@ A dispatch document defines a unit of parallelizable work (a "thread") with:
 - Numbered tasks with scope, deliverables, and validation commands
 - Completion criteria
 
-Dispatch docs live in `docs/planning/dispatch/` and are the bridge between the backlog (what to do) and agent execution (doing it).
+Dispatch docs live in `<planning>/dispatch/` and are the bridge between the backlog (what to do) and agent execution (doing it).
 
 ## Parsing Invocation
 
@@ -113,7 +115,7 @@ Field reference:
 | `scope` | no | Target scope name from `.ordvik.yml` (multi-scope repos only). Omit for single-scope repos or root-scope work. |
 | `source` | yes | Where this work comes from. Use scope-prefixed RFC refs in multi-scope repos (e.g., `RFC search/0069`). |
 | `status` | no | Lifecycle state: `active` (default, can be omitted), `done`, or `superseded`. See conventions doc for lifecycle rules. |
-| `plan` | no | Slug of the dispatch plan this thread belongs to (`docs/planning/plans/<slug>.md`) |
+| `plan` | no | Slug of the dispatch plan this thread belongs to (`<planning>/plans/<slug>.md`) |
 | `depends_on` | no | Thread ids that must complete first. Leave it out when `plan` is set: the plan owns ordering |
 | `human_gates` | no | List of task descriptions that require human execution |
 | `platform` | no | `darwin`, `linux`, or `any` (default: `any`) — platform constraint |
@@ -155,7 +157,7 @@ repo:
 ```bash
 cd ../ordvik
 claude "Read and execute the dispatch document at \
-  ../monorepo/docs/planning/dispatch/020-widget-api.md"
+  ../monorepo/<planning>/dispatch/020-widget-api.md"
 ```
 
 The `repo` field documents the relationship even when launch is manual — it tells the human (and future tooling) which repo to target, where to clone it from, and what reference access is needed.
@@ -304,14 +306,14 @@ Shared testing strategy across all tasks (unit, integration, regression).
 
 ### `create <slug> [--plan <slug>] [--source <ref>]`
 
-1. **Check planning structure** — If `docs/planning/dispatch/` doesn't exist, create it. Note whether `docs/planning/threads.md` and `docs/planning/backlog.md` exist (used for context but not required).
+1. **Check planning structure** — If `<planning>/dispatch/` doesn't exist, create it. Note whether `<planning>/threads.md` and `<planning>/backlog.md` exist (used for context but not required).
 
 2. **Determine repo model** — Read `.ordvik.yml` if it exists. In multi-scope repos, determine which scope this dispatch targets (from `--source` RFC prefix, from conversation context, or ask the user). Read the scope's config for `paths`, `language`, and `designs` directory.
 
 3. **Gather context** — Use `AskUserQuestion` to understand:
    - What work needs to be done? (or read from the referenced backlog item/RFC)
-   - What thread does this belong to? (check `docs/planning/threads.md` if it exists)
-   - Is this part of a plan? (check `docs/planning/plans/`; if so, add `plan:` and its entry in the plan, not `depends_on`)
+   - What thread does this belong to? (check `<planning>/threads.md` if it exists)
+   - Is this part of a plan? (check `<planning>/plans/`; if so, add `plan:` and its entry in the plan, not `depends_on`)
    - What is the source? (RFC, backlog item, ad-hoc). Use scope-prefixed RFC references in multi-scope repos.
    - Which scope does this target? (multi-scope repos only)
    - Does the work happen in a different repo? If so, gather `repo` fields (path, url, add_dirs).
@@ -350,14 +352,14 @@ Shared testing strategy across all tasks (unit, integration, regression).
 
    A list of commands for the operator to type is not a gate; it is a missing command.
 
-8. **Write the document** — Create the file at `docs/planning/dispatch/YYYYMMDD-<slug>.md` (today's date) following the format above. In multi-scope repos, include the `scope` field in frontmatter. Always include the Pre-PR Checklist and Pre-existing issues sections.
+8. **Write the document** — Create the file at `<planning>/dispatch/YYYYMMDD-<slug>.md` (today's date) following the format above. In multi-scope repos, include the `scope` field in frontmatter. Always include the Pre-PR Checklist and Pre-existing issues sections.
 
 9. **Report** — Show the user: file path, thread id, plan (if any), scope (if multi-scope), task count, and any human gates.
 
 ### `list [--plan <slug>] [--archived] [--status <s>]`
 
-1. Glob `docs/planning/dispatch/*.md` (exclude human-week docs). By default, exclude `archive/` subdirectory.
-2. If `--archived` is given, also glob `docs/planning/dispatch/archive/*.md` and include those results.
+1. Glob `<planning>/dispatch/*.md` (exclude human-week docs). By default, exclude `archive/` subdirectory.
+2. If `--archived` is given, also glob `<planning>/dispatch/archive/*.md` and include those results.
 3. Parse YAML frontmatter from each file. Treat missing `status` as `active`.
 4. If `--plan` is given, filter to docs with that `plan`.
 5. If `--status` is given, filter to that status only (e.g., `--status done`).
@@ -373,14 +375,14 @@ Closes a dispatch thread by updating its status and archiving. Read `${CLAUDE_SK
    - Set `status: superseded` in frontmatter
    - Add `superseded_by: "<ref>"` field to frontmatter
    - Insert a blockquote after the title heading: `> **Superseded** by [<ref>](./<ref>.md). This document is retained for historical context.`
-   - Archive immediately — move to `docs/planning/dispatch/archive/`
+   - Archive immediately — move to `<planning>/dispatch/archive/`
    - Report what was done
 
 3. **If closing as done** (normal close):
    - Validate all tasks have the `— DONE` marker. If any are missing, report which tasks are not marked done and ask the user to confirm or mark them.
    - Validate all completion criteria checkboxes are checked (`[x]`). Report any unchecked items.
    - Set `status: done` in frontmatter
-   - Archive immediately to `docs/planning/dispatch/archive/` (in the thread's own PR when it has one)
+   - Archive immediately to `<planning>/dispatch/archive/` (in the thread's own PR when it has one)
    - If the doc has `plan:`, run `scripts/plan status <slug>`. If every thread is finished, prompt the user to run `/ordvik:planning plan-close <slug>`; otherwise tell the plan's conductor what this unblocks.
    - Ask the user about backlog follow-ons — are there new items to add from this work?
 
@@ -397,7 +399,7 @@ Convenience operation to standardize the task completion marker.
 ### `plan new|status|conduct|amend <slug>`
 
 Dispatch plans: work that spans more than one round of threads gets a plan file in
-`docs/planning/plans/<slug>.md` listing its threads, what each waits on (a
+`<planning>/plans/<slug>.md` listing its threads, what each waits on (a
 thread, one task of a thread, or an operator gate), and a log of changes.
 One agent, the plan's **conductor**, keeps it moving. Read
 `${CLAUDE_SKILL_DIR}/references/plans.md` first: it defines the format, the
@@ -407,7 +409,7 @@ The status tool is `scripts/plan` (installed by `/ordvik:init` from
 `${CLAUDE_PLUGIN_ROOT}/scripts/plan`). If the repo lacks it, run it from the
 plugin: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/plan ...`.
 
-- **`new`**: write `docs/planning/plans/<slug>.md` (frontmatter `plan`,
+- **`new`**: write `<planning>/plans/<slug>.md` (frontmatter `plan`,
   `title`, `status`, `source`, `conductor`, `threads`, `gates`; body with
   Decisions, Threads, Not in this plan, Log). Write dispatch docs for the
   threads that can start first with `create`, adding `plan: <slug>` and no `depends_on`.

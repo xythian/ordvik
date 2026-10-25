@@ -30,7 +30,7 @@ Test coverage gaps tend to accumulate at boundaries — where subsystems interac
 - Check for missing edge case tests: nil/empty inputs, error paths, boundary conditions
 
 **Deliverables**:
-- `docs/planning/gardening/YYYY-MM-DD-test-coverage.md` with findings categorized:
+- `<planning>/gardening/YYYY-MM-DD-test-coverage.md` with findings categorized:
   - **critical-gap** — high-churn code with no tests, or subsystem boundary with no integration test
   - **missing-tests** — package/module with no test files
   - **weak-tests** — tests exist but don't assert meaningfully

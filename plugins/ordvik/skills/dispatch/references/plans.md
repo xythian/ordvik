@@ -1,5 +1,7 @@
 # Dispatch plans — reference
 
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
+
 A single dispatch doc launches well: `wt launch`, a remote agent host, or
 an agent session (for example a Claude project thread) told to execute it. Work that spans
 several rounds of threads needs more: one place that says what waits for
@@ -39,8 +41,8 @@ PR are unchanged (see the dispatch skill and its conventions).
 
 ## The plan file
 
-Plans live in `docs/planning/plans/<slug>.md` and move to
-`docs/planning/plans/archive/` when done. The frontmatter is the machine
+Plans live in `<planning>/plans/<slug>.md` and move to
+`<planning>/plans/archive/` when done. The frontmatter is the machine
 part; the body is for people.
 
 ```yaml
@@ -189,7 +191,7 @@ The conductor never polls in a loop. It wakes on:
    from them goes on the checklist.
 6. When every thread is done: write the retro in the plan, set
    `status: done`, move it to `plans/archive/`, and update the backlog and
-   `docs/planning/threads.md` (if they exist).
+   `<planning>/threads.md` (if they exist).
 
 ### Launching
 
@@ -202,7 +204,7 @@ The conductor never polls in a loop. It wakes on:
 The brief for an executing thread:
 
 > Execute the dispatch doc `<path>` on the default branch. It is thread `<id>` of
-> plan `<slug>` (`docs/planning/plans/<slug>.md`); the conductor is
+> plan `<slug>` (`<planning>/plans/<slug>.md`); the conductor is
 > `<conductor thread>`. Other threads wait on your `<Task N, ...>`: land
 > each in its own PR, marked `— DONE`, and tell the conductor when it
 > merges. Send the conductor your PR link when it is up, and tell it about

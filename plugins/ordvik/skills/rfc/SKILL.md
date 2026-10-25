@@ -203,7 +203,7 @@ Same as `create`, but additionally:
 4. Add or update the `**Updated**` field with today's date.
 5. Report the change.
 6. **If the new status is `accepted`:**
-   - Ask the user whether a backlog item should be created for implementation (if `docs/planning/backlog.md` exists).
+   - Ask the user whether a backlog item should be created for implementation (if the project has a backlog: `backlog/` in the planning repository, or `docs/planning/backlog.md`).
    - Ask whether any design docs need to be updated or created as a result of this RFC.
    - If yes, identify which design docs are affected (check `docs/designs/` and `<project>/docs/designs/` as appropriate).
    - Note the affected docs for follow-up. Optionally offer to draft the updates now.

@@ -18,6 +18,8 @@ allowed_tools:
 
 # Operator Asks Skill
 
+**Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
+
 An **ask** is something only the operator can move: a decision, a review,
 or a step that needs their accounts, devices or approval. Asks are already
 recorded across the repo (human gates, plan gates, RFCs awaiting a
@@ -80,7 +82,7 @@ Only for an ask that has nowhere else to live. A human gate belongs in its
 dispatch doc's `human_gates` and Task heading. A plan gate belongs in the
 plan's `gates`. If one of those fits, put the ask there instead.
 
-Write `docs/planning/asks/<slug>.md`:
+Write `<planning>/asks/<slug>.md`:
 
 ```yaml
 ---
@@ -102,7 +104,7 @@ Run `scripts/asks check` before committing.
 
 Add `answered: YYYY-MM-DD`, `outcome:` (`done`, `decided`, `rejected`,
 `automate` or `dropped`) and `answer:` (one line, with a link to whatever
-records the result). Then `git mv` the file to `docs/planning/asks/archive/`.
+records the result). Then `git mv` the file to `<planning>/asks/archive/`.
 For `automate`, the answer names the backlog item or dispatch that will
 build the command. Run `scripts/asks check`.
 
