@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,13 @@ Usage:
                                            What is waiting on the operator
   ordvik planning asks check               Validate ask files and gate entries
   ordvik planning projects [--json]        The projects and their repositories
+  ordvik planning link <project>/<id> --pr <owner/name#n> [--task <n>]... [--done]
+                                           Record a PR on a dispatch doc and push the planning repository
+
+A dispatch's tasks are done once a PR linked to them (prs:) has merged, and
+the dispatch once a PR linked with --done has merged and no human gate is
+open. PR state comes from the GitHub API ($GITHUB_TOKEN or $GH_TOKEN, else
+gh); --no-prs reads only the marks in the docs.
 
 Every command takes:
   --ref <ref>   Read dispatch docs from <ref> (default origin/HEAD, else origin/main or master)
@@ -30,6 +38,7 @@ Every command takes:
   --offline     In the planning repository, do not fetch (it fetches by default)
   --worktree    Read everything from the working tree (the default for check
                 in the planning repository, so an edit is checked before it is committed)
+  --no-prs      Do not read linked PRs' state
 
 <plan> is a path, <project>/<slug>, or a slug under a project's plans/.
 
@@ -51,6 +60,10 @@ type opts struct {
 	all      bool
 	today    string
 	project  string
+	noPRs    bool
+	pr       string
+	tasks    []int
+	done     bool
 	args     []string
 }
 
@@ -73,6 +86,21 @@ func parse(argv []string) (opts, error) {
 			o.today, err = takes()
 		case "--project":
 			o.project, err = takes()
+		case "--pr":
+			o.pr, err = takes()
+		case "--task":
+			var t string
+			if t, err = takes(); err == nil {
+				var n int
+				if n, err = strconv.Atoi(t); err != nil || n < 1 {
+					err = fmt.Errorf("--task takes a task number")
+				}
+				o.tasks = append(o.tasks, n)
+			}
+		case "--done":
+			o.done = true
+		case "--no-prs":
+			o.noPRs = true
 		case "--fetch":
 			o.fetch = true
 		case "--offline":
@@ -149,6 +177,9 @@ func planningCmd(argv []string, stdout, stderr io.Writer, _ bool) int {
 		return 1
 	}
 	repo := store.Layout == planning.LayoutRepo
+	if cmd == "link" {
+		return link(store, o, stdout, stderr)
+	}
 	if o.fetch || (repo && !o.offline && o.ref == "" && !o.worktree && cmd != "check") {
 		if err := store.Git.Fetch(); err != nil {
 			if o.fetch {
@@ -193,12 +224,27 @@ func planningCmd(argv []string, stdout, stderr io.Writer, _ bool) int {
 	return 2
 }
 
+// prSource reads linked PRs' state; tests replace it.
+var prSource planning.PRSource = &planning.GitHub{}
+
 func docsFor(view *planning.View) (*planning.Docs, []*planning.Doc, error) {
 	found, err := view.AllDocs("")
 	if err != nil {
 		return nil, nil, err
 	}
 	return planning.IndexDocs(found), found, nil
+}
+
+// derivedDocs is docsFor with done derived from merged PRs (unless
+// --no-prs), its notes on stderr.
+func derivedDocs(view *planning.View, o opts, stderr io.Writer) (*planning.Docs, []*planning.Doc, error) {
+	docs, found, err := docsFor(view)
+	if err == nil && !o.noPRs {
+		for _, n := range planning.DerivePRs(found, prSource) {
+			fmt.Fprintf(stderr, "note: %s\n", n)
+		}
+	}
+	return docs, found, err
 }
 
 func loadPlan(view *planning.View, arg string) (*planning.Plan, error) {
@@ -210,7 +256,7 @@ func loadPlan(view *planning.View, arg string) (*planning.Plan, error) {
 }
 
 func status(view *planning.View, o opts, cmd string, stdout, stderr io.Writer) int {
-	docs, _, err := docsFor(view)
+	docs, _, err := derivedDocs(view, o, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 1
@@ -266,6 +312,7 @@ func check(view *planning.View, o opts, stdout, stderr io.Writer) int {
 	}
 	if len(o.args) == 0 {
 		errors, warnings := planning.CheckIDs(found, home(view))
+		errors = append(errors, planning.CheckPRs(found)...)
 		if view.Store.Layout == planning.LayoutRepo {
 			errors = append(errors, planning.CheckProjects(view.Projects)...)
 		}
@@ -318,6 +365,9 @@ func asks(view *planning.View, o opts, stdout, stderr io.Writer) int {
 	} else {
 		sources = []planning.RFCSource{view.LocalRFCSource()}
 	}
+	if !o.noPRs {
+		view.PRs = prSource
+	}
 	res, err := view.Gather(t, o.all, sources, o.project)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
@@ -357,7 +407,14 @@ func projects(view *planning.View, o opts, stdout io.Writer) int {
 	for _, p := range view.Projects {
 		fmt.Fprintf(stdout, "%s  %s\n", p.Name, p.Title)
 		if len(p.Owns) > 0 {
-			fmt.Fprintf(stdout, "  owns: %s\n", strings.Join(p.Owns, ", "))
+			var owns []string
+			for _, r := range p.Owns {
+				if p.IsPublic(r) {
+					r += " (public)"
+				}
+				owns = append(owns, r)
+			}
+			fmt.Fprintf(stdout, "  owns: %s\n", strings.Join(owns, ", "))
 		}
 		var deps []string
 		for _, d := range p.DependsOn {
@@ -367,5 +424,29 @@ func projects(view *planning.View, o opts, stdout io.Writer) int {
 			fmt.Fprintf(stdout, "  depends on: %s\n", strings.Join(deps, ", "))
 		}
 	}
+	return 0
+}
+
+func link(store *planning.Store, o opts, stdout, stderr io.Writer) int {
+	if len(o.args) != 1 || o.pr == "" {
+		fmt.Fprintln(stderr, "Error: link takes <project>/<id> and --pr <owner/name#n>.")
+		return 2
+	}
+	repo, n, ok := planning.ParsePRRef(o.pr)
+	if !ok {
+		fmt.Fprintf(stderr, "Error: --pr %q is not owner/name#number.\n", o.pr)
+		return 2
+	}
+	l := planning.PRLink{Repo: repo, Number: n, Tasks: o.tasks, Done: o.done}
+	path, added, err := store.Link(o.args[0], l)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	if !added {
+		fmt.Fprintf(stdout, "%s already links %s.\n", path, l.Ref())
+		return 0
+	}
+	fmt.Fprintf(stdout, "Linked %s on %s and pushed.\n", l.Ref(), path)
 	return 0
 }

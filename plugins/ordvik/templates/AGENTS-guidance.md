@@ -6,7 +6,7 @@ This repo follows ordvik's development process: goal, research, RFC, plan and di
 - Merging an RFC's PR accepts it, unless the PR says the RFC is tabled.
 - New dispatch docs are named `YYYYMMDD-<slug>.md`; the name is the thread id.
 - Rebase onto the default branch, no merge commits; tidy your own branch's commits before review without asking.
-- A dispatch closes in its own PR (in a planning repository, a commit there once the PR merges). Large threads write a short retro; hard-won fixes get a TIL.
+- A dispatch closes in its own PR. With a planning repository, link each PR to its dispatch (`ordvik planning link <project>/<id> --pr <owner/name#n> --task <n>` or `--done`) and keep the dispatch, plan and planning repository out of commits, branches and PR bodies. Large threads write a short retro; hard-won fixes get a TIL.
 
 ## Planning & Backlog
 

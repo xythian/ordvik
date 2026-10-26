@@ -14,7 +14,7 @@ active  →  done
 ```
 
 - **`active`** — Work is in progress or pending. This is the default; the field can be omitted and missing `status` is treated as `active`.
-- **`done`** — All tasks completed and completion criteria verified. Set via the `close` operation in a last commit of the thread's own PR, so merging that PR is what makes the thread done on the default branch.
+- **`done`** — All tasks completed and completion criteria verified. Set via the `close` operation in a last commit of the thread's own PR, so merging that PR is what makes the thread done on the default branch. In the planning repository it is also derived: a merged PR linked with `ordvik planning link --done` makes it done once every human gate is marked, and a merged PR linked with `--task <n>` marks those tasks.
 - **`superseded`** — Replaced by a newer dispatch doc. Set via `close --superseded-by <ref>`.
 
 When superseding a dispatch doc, two fields are added:
@@ -99,7 +99,7 @@ wherever the repo keeps them.
 Before closing a dispatch thread (`/ordvik:dispatch close <file>`):
 
 - [ ] All tasks marked `— DONE`
-- [ ] Closing in the thread's own PR, as its last commit (not a follow-up PR)
+- [ ] Closing in the thread's own PR, as its last commit (not a follow-up PR); in the planning repository, the PR linked with `--done` instead
 - [ ] `status` set to `done` (or `superseded` with `superseded_by`)
 - [ ] All completion criteria checked off
 - [ ] Backlog updated — completed items marked done, follow-on items added if needed

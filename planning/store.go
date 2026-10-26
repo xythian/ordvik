@@ -43,6 +43,7 @@ type Project struct {
 	Title     string       `json:"title"`
 	Dir       string       `json:"dir"`
 	Owns      []string     `json:"owns"`
+	Public    []string     `json:"public,omitempty"` // owned repos that are public: no planning in their history
 	DependsOn []Dependency `json:"depends_on"`
 	Incoming  string       `json:"incoming"`
 }
@@ -75,6 +76,7 @@ type View struct {
 	Docs     Tree
 	Files    Tree
 	Projects []*Project
+	PRs      PRSource // when set, Gather derives done from linked PRs
 }
 
 // NewView reads dispatch docs from ref, or from the working tree when ref
@@ -157,6 +159,15 @@ func parseProject(dir, text string) (*Project, error) {
 		p.Title = pyStr(t)
 	}
 	for _, r := range asList(get(m, "owns")) {
+		// An owned repo is owner/name, or {repo: owner/name, public: true}.
+		if x, ok := r.(map[string]any); ok {
+			name := pyStr(get(x, "repo"))
+			p.Owns = append(p.Owns, name)
+			if truthy(get(x, "public")) {
+				p.Public = append(p.Public, name)
+			}
+			continue
+		}
 		p.Owns = append(p.Owns, pyStr(r))
 	}
 	for _, d := range asList(get(m, "depends_on")) {
@@ -193,6 +204,11 @@ func legacyProjectName(root string) string {
 	}
 	return filepath.Base(root)
 }
+
+// IsPublic says whether an owned repo is public. A public repo's commits,
+// branches and PR bodies name no dispatch, plan or planning repository;
+// its work is linked from the planning side (`prs:` on the dispatch doc).
+func (p *Project) IsPublic(repo string) bool { return contains(p.Public, repo) }
 
 // Project is the project named name, or nil.
 func (v *View) Project(name string) *Project {

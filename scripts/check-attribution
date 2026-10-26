@@ -11,8 +11,17 @@ git identity is Claude, so this is enforced rather than remembered:
   check-attribution body              fail on a PR body read from stdin (CI)
   check-attribution strip <file>      remove the lines from a commit message (commit-msg hook)
   check-attribution author            fail if the configured author is Claude (pre-commit hook)
+
+A public repository passes --public before the command (its workflow and
+hooks do). Its history must not show the private planning behind it either:
+no Dispatch: trailer (the planning repository links work through prs: on
+the dispatch doc), no Claude project thread link, no path into a planning
+repository's projects/, and nothing matching a pattern in $PUBLIC_DENY or
+git config attribution.deny (one regular expression per line or value,
+kept out of the repository; CI passes them from a secret).
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -29,6 +38,29 @@ LINES = [
 # a project thread, claude.ai/code/project/..., which is allowed).
 ANYWHERE = [re.compile(r"claude\.ai/code/session_", re.I)]
 AUTHOR = re.compile(r"noreply@anthropic\.com|^claude\b", re.I)
+
+# --public: lines strip removes, and text found anywhere.
+PUBLIC_LINES = [re.compile(r"^\s*Dispatch:\s", re.I)]
+PUBLIC_ANYWHERE = [
+    re.compile(r"claude\.ai/code/project/", re.I),
+    re.compile(r"\bprojects/[A-Za-z0-9_.-]+/(dispatch|plans|asks)/"),
+]
+
+
+PUBLIC = " or names the private planning behind this public repository"
+WHAT = ""
+
+
+def public_mode():
+    """Turn on the public checks."""
+    global WHAT
+    WHAT = PUBLIC
+    LINES.extend(PUBLIC_LINES)
+    ANYWHERE.extend(PUBLIC_LINES + PUBLIC_ANYWHERE)
+    deny = os.environ.get("PUBLIC_DENY", "").splitlines()
+    r = subprocess.run(["git", "config", "--get-all", "attribution.deny"], capture_output=True, text=True)
+    deny += r.stdout.splitlines()
+    ANYWHERE.extend(re.compile(d.strip(), re.I) for d in deny if d.strip())
 
 
 def findings(text):
@@ -66,7 +98,7 @@ def cmd_commits(rng):
             print(f"{sha[:10]}: {p}")
         bad += bool(problems)
     if bad:
-        print(f"\n{bad} commit(s) carry Claude attribution. Ken is the author of every change: "
+        print(f"\n{bad} commit(s) carry Claude attribution{WHAT}. Ken is the author of every change: "
               "re-author them (git rebase --exec 'git commit --amend --no-edit --reset-author' with "
               "user.name/user.email set to Ken) and drop the trailers, then force-push the branch.")
     return 1 if bad else 0
@@ -77,7 +109,8 @@ def cmd_body():
     for p in problems:
         print(f"PR body {p}")
     if problems:
-        print("\nThe PR body carries Claude attribution; edit it out (the projects attribution header is fine).")
+        print(f"\nThe PR body carries Claude attribution{WHAT}; edit it out"
+              + ("." if WHAT else " (the projects attribution header is fine)."))
     return 1 if problems else 0
 
 
@@ -103,6 +136,9 @@ def cmd_author():
 
 
 def main(argv):
+    if argv[:1] == ["--public"]:
+        public_mode()
+        argv = argv[1:]
     if len(argv) >= 2 and argv[0] == "commits":
         return cmd_commits(argv[1])
     if argv == ["body"]:

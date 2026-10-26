@@ -1,6 +1,6 @@
 {
   "name": "ordvik",
   "description": "Agent toolkit — planning model, RFC management, dispatch documents, and reporting",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "author": { "name": "Ken Fox" }
 }

@@ -78,6 +78,9 @@ type Doc struct {
 	Tasks     map[int]bool
 	TaskOrder []int
 	Archived  bool
+	PRs       []PRLink // the PRs that carry its work (prs:)
+	PRErrors  []string
+	DoneBy    string // "PR" when DerivePRs made it done
 	YAMLError string
 	Meta      map[string]any
 	Body      string
@@ -152,6 +155,7 @@ func ParseDoc(layout, project, p, text string) *Doc {
 		d.DependsOn = append(d.DependsOn, pyStr(dep))
 	}
 	d.Archived = strings.Contains(p, "/archive/")
+	d.PRs, d.PRErrors = parsePRLinks(get(meta, "prs"))
 	return d
 }
 

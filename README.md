@@ -41,6 +41,8 @@ ordvik planning ready <project>/<plan>             # dispatch docs to launch now
 ordvik planning check [<plan>]                     # validate plans, dispatch ids, projects
 ordvik planning asks [--json] [--project <p>]      # what waits on the operator
 ordvik planning projects                           # projects and their repositories
+ordvik planning link <project>/<id> --pr <owner/name#n> [--task <n>]... [--done]
+                                                   # record a PR on its dispatch doc
 ```
 
 `ordvik plan ...` and `ordvik asks ...` take the same arguments and print

@@ -95,6 +95,35 @@ class CheckAttributionTest(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.commit("feat: z", CLAUDE)
 
+    def test_public_rejects_planning(self):
+        msg = "feat: x\n\nSee projects/home/dispatch/20261025-x.md.\n\nDispatch: home/20261025-x done\n"
+        self.commit(msg, KEN)
+        self.assertEqual(self.run_script("commits", "master~1..master")[0], 0)
+        code, out = self.run_script("--public", "commits", "master~1..master")
+        self.assertEqual(code, 1)
+        self.assertIn("Dispatch: home/20261025-x done", out)
+        self.assertIn("projects/home/dispatch/", out)
+        self.assertIn("private planning", out)
+
+    def test_public_body_and_deny_patterns(self):
+        self.assertEqual(self.run_script("body", stdin=PROJECT_HEADER)[0], 0)
+        code, out = self.run_script("--public", "body", stdin=PROJECT_HEADER)
+        self.assertEqual(code, 1)
+        self.assertIn("claude.ai/code/project/", out)
+        body = "Ports the guard from the secret-monorepo.\n"
+        self.assertEqual(self.run_script("--public", "body", stdin=body)[0], 0)
+        code, out = self.run_script("--public", "body", stdin=body, env={"PUBLIC_DENY": "secret-mono\\w+\n"})
+        self.assertEqual(code, 1)
+        self.git("config", "attribution.deny", "monorepo")
+        self.assertEqual(self.run_script("--public", "body", stdin=body)[0], 1)
+
+    def test_public_strip_drops_dispatch_trailer(self):
+        path = os.path.join(self.dir, "msg")
+        with open(path, "w") as f:
+            f.write("feat: x\n\nBody.\n\nDispatch: home/x task 1\n")
+        self.assertEqual(self.run_script("--public", "strip", path)[0], 0)
+        self.assertEqual(read(path), "feat: x\n\nBody.\n")
+
 
 if __name__ == "__main__":
     unittest.main()

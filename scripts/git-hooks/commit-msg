@@ -1,3 +1,4 @@
 #!/bin/sh
-# Drop Claude attribution trailers from the message (scripts/check-attribution).
-exec python3 "$(git rev-parse --show-toplevel)/scripts/check-attribution" strip "$1"
+# Drop Claude attribution and Dispatch: trailers from the message
+# (scripts/check-attribution; this repository is public).
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check-attribution" --public strip "$1"

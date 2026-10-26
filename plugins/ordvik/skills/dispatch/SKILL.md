@@ -120,6 +120,20 @@ Field reference:
 | `human_gates` | no | List of task descriptions that require human execution |
 | `platform` | no | `darwin`, `linux`, or `any` (default: `any`) — platform constraint |
 | `repo` | no | Cross-repo dispatch target (see below) |
+| `prs` | no | Planning repository only: the PRs that carry the work, each `{pr: "owner/name#n", tasks: [n, ...]}` or `{pr: ..., done: true}`. Written by `ordvik planning link`; see Linking PRs below |
+
+### Linking PRs
+
+In the planning repository, a thread links each PR it opens to its dispatch doc, and done is read from those PRs merging: no planning edit after the merge, and nothing about planning in the code repository.
+
+```bash
+ordvik planning link <project>/<id> --pr <owner/name#n> --task 1 --task 2   # this PR completes tasks 1 and 2
+ordvik planning link <project>/<id> --pr <owner/name#n> --done              # this PR completes the dispatch
+```
+
+Run it from the planning checkout right after opening the PR; it commits to the planning repository's `main` and pushes. A task is done once a PR that lists it merges; the dispatch is done once a PR linked with `--done` merges and every human gate is marked. Gates stay open until the operator's answer is recorded.
+
+Commits, branch names, PR titles and bodies, and code comments in the code repository never name the dispatch, plan or planning repository: no `Dispatch:` trailer, no planning links. In a repository its `project.yml` lists as `{repo: ..., public: true}` this is enforced (`scripts/check-attribution --public`), and there the branch is a plain slug rather than the dispatch id.
 
 ### Cross-Repo Dispatch
 
@@ -382,7 +396,7 @@ Closes a dispatch thread by updating its status and archiving. Read `${CLAUDE_SK
    - Validate all tasks have the `— DONE` marker. If any are missing, report which tasks are not marked done and ask the user to confirm or mark them.
    - Validate all completion criteria checkboxes are checked (`[x]`). Report any unchecked items.
    - Set `status: done` in frontmatter
-   - Archive immediately to `<planning>/dispatch/archive/` (in the thread's own PR when it has one)
+   - Archive immediately to `<planning>/dispatch/archive/` (in the thread's own PR when it has one; in the planning repository, a commit there whenever the files want tidying, since a `--done` PR link already makes it done)
    - If the doc has `plan:`, run `scripts/plan status <slug>`. If every thread is finished, prompt the user to run `/ordvik:planning plan-close <slug>`; otherwise tell the plan's conductor what this unblocks.
    - Ask the user about backlog follow-ons — are there new items to add from this work?
 

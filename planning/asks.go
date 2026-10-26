@@ -290,6 +290,10 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 	if err != nil {
 		return nil, err
 	}
+	var prNotes []string
+	if v.PRs != nil {
+		prNotes = DerivePRs(found, v.PRs)
+	}
 	docs := IndexDocs(found)
 	gates := v.dispatchGates(docs)
 	plans, err := v.ActivePlans()
@@ -307,7 +311,7 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 			added[k] = d
 		}
 	}
-	res := &AsksResult{}
+	res := &AsksResult{Notes: prNotes}
 	for _, g := range gates {
 		doc := g.doc
 		if doc.Status != "active" && doc.Status != "" {

@@ -154,6 +154,12 @@ The repo's `AGENTS.md` names its actual hosts for each row.
   reservations) merge themselves once CI is green, where the repo has a
   workflow for it; until then the operator merges them too. Merging some code on an
   automated risk assessment is future work and needs its own RFC.
+- **Link the PR, don't name the plan.** With a planning repository, the
+  thread links each PR it opens to its dispatch doc
+  (`ordvik planning link <project>/<id> --pr <owner/name#n> --task <n>` or
+  `--done`). The code repository's commits, branches, PR bodies and code
+  never name a dispatch, plan or the planning repository; a repository
+  marked `public: true` in its `project.yml` enforces it.
 - **Attribution.** Commits are authored by the operator. Follow the repo's
   attribution rule exactly; where it forbids AI attribution, set the git
   identity to the operator before the first commit and remove any footer a
@@ -164,6 +170,9 @@ The repo's `AGENTS.md` names its actual hosts for each row.
 - **A dispatch closes in its own PR**, as the last commit before review:
   `status: done`, the doc moved to `dispatch/archive/`, links fixed, the
   thread registry row updated. Merging the PR is what completes the thread.
+  With a planning repository, the PR's `--done` link closes it instead:
+  merging the PR makes the dispatch done, and archiving is a commit to the
+  planning repository whenever the files want tidying.
 - **Retros.** A plan writes a retro when it closes. A large standalone
   thread (about five or more tasks, or a week or more) writes a short one
   in its dispatch doc's `## Retro`. A fix that took several failed
