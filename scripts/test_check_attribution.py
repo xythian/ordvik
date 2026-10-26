@@ -27,7 +27,7 @@ class CheckAttributionTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = self.tmp.name
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_") and k != "ORDVIK_PLANNING"}
         self.env.update(HOME=self.dir, GIT_CONFIG_NOSYSTEM="1", **KEN)
         self.git("init", "-q", "-b", "master")
         self.commit("base", {})
@@ -105,17 +105,63 @@ class CheckAttributionTest(unittest.TestCase):
         self.assertIn("projects/home/dispatch/", out)
         self.assertIn("private planning", out)
 
-    def test_public_body_and_deny_patterns(self):
+    def test_public_body(self):
         self.assertEqual(self.run_script("body", stdin=PROJECT_HEADER)[0], 0)
         code, out = self.run_script("--public", "body", stdin=PROJECT_HEADER)
         self.assertEqual(code, 1)
         self.assertIn("claude.ai/code/project/", out)
-        body = "Ports the guard from the secret-monorepo.\n"
-        self.assertEqual(self.run_script("--public", "body", stdin=body)[0], 0)
-        code, out = self.run_script("--public", "body", stdin=body, env={"PUBLIC_DENY": "secret-mono\\w+\n"})
+
+    def planning(self):
+        """A planning checkout: a private project, a project owning a public repo."""
+        root = os.path.join(self.dir, "plan")
+        files = {
+            "planning.yml": "public_deny: ['hush-\\w+']\n",
+            "projects/secretmono/project.yml": "project: secretmono\nowns: [acme/secretmono, acme/vault]\n",
+            "projects/tool/project.yml": "project: tool\nowns:\n  - {repo: acme/tool, public: true}\n  - acme/tool-infra\n",
+        }
+        for rel, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+            with open(os.path.join(root, rel), "w") as f:
+                f.write(text)
+        subprocess.run(["git", "init", "-q", root], check=True, env=self.env)
+        subprocess.run(["git", "-C", root, "remote", "add", "origin", "git@github.com:acme/plans.git"], check=True, env=self.env)
+        return {"ORDVIK_PLANNING": root}
+
+    def test_public_names_from_planning(self):
+        env = self.planning()
+        ok = "Ports the tool's guard to acme/tool.\n"
+        self.assertEqual(self.run_script("--public", "body", stdin=ok, env=env)[0], 0)
+        for bad in ["Ports the guard from secretmono.\n", "See acme/vault.\n", "Moves acme/tool-infra.\n",
+                    "Tracked in acme/plans.\n", "For hush-project.\n"]:
+            code, out = self.run_script("--public", "body", stdin=bad, env=env)
+            self.assertEqual(code, 1, bad)
+            self.assertNotIn(bad.strip(), out)  # the log does not repeat the name
+        self.assertEqual(self.run_script("--public", "body", stdin="secretmono\n")[0], 0)  # no checkout
+
+    def test_public_commits_check_added_lines(self):
+        env = self.planning()
+        with open(os.path.join(self.dir, "notes.md"), "w") as f:
+            f.write("copied from secretmono\n")
+        self.git("add", "notes.md")
+        self.commit("docs: notes", KEN)
+        code, out = self.run_script("--public", "commits", "master~1..master", env=env)
         self.assertEqual(code, 1)
-        self.git("config", "attribution.deny", "monorepo")
-        self.assertEqual(self.run_script("--public", "body", stdin=body)[0], 1)
+        self.assertIn("notes.md: adds a line", out)
+        self.assertEqual(self.run_script("--public", "commits", "master~1..master")[0], 0)
+
+    def test_pre_push(self):
+        env = self.planning()
+        base = self.git("rev-parse", "HEAD").strip()
+        self.commit("feat: ok", KEN)
+        good = self.git("rev-parse", "HEAD").strip()
+        self.commit("feat: for secretmono", KEN)
+        bad = self.git("rev-parse", "HEAD").strip()
+        zero = "0" * 40
+        push = lambda local, remote: f"refs/heads/master {local} refs/heads/master {remote}\n"
+        self.assertEqual(self.run_script("--public", "pre-push", stdin=push(good, base), env=env)[0], 0)
+        self.assertEqual(self.run_script("--public", "pre-push", stdin=push(bad, good), env=env)[0], 1)
+        self.assertEqual(self.run_script("--public", "pre-push", stdin=push(bad, zero), env=env)[0], 1)
+        self.assertEqual(self.run_script("--public", "pre-push", stdin=push(zero, bad), env=env)[0], 0)
 
     def test_public_strip_drops_dispatch_trailer(self):
         path = os.path.join(self.dir, "msg")

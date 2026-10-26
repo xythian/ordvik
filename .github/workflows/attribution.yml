@@ -2,8 +2,9 @@
 # authored as Claude or carry Claude trailers, and the PR body carries no
 # "Generated with Claude Code" footer (scripts/check-attribution). This
 # repository is public, so --public also keeps private planning out:
-# Dispatch: trailers, planning paths, project-thread links, and the
-# patterns in the PUBLIC_DENY secret. Runs on body edits too.
+# Dispatch: trailers, planning paths and project-thread links. The private
+# names themselves are checked before a push, by the pre-push hook against a
+# planning checkout, so they never appear here. Runs on body edits too.
 name: attribution
 
 on:
@@ -23,12 +24,9 @@ jobs:
           fetch-depth: 0
 
       - name: Commits
-        env:
-          PUBLIC_DENY: ${{ secrets.PUBLIC_DENY }}
         run: scripts/check-attribution --public commits "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
 
       - name: Pull request body
         env:
           BODY: ${{ github.event.pull_request.body }}
-          PUBLIC_DENY: ${{ secrets.PUBLIC_DENY }}
         run: printf '%s\n' "$BODY" | scripts/check-attribution --public body

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuse to push a commit that names the private planning behind this public
+# repository, by the names a planning checkout holds (scripts/check-attribution).
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check-attribution" --public pre-push

@@ -11,14 +11,23 @@ git identity is Claude, so this is enforced rather than remembered:
   check-attribution body              fail on a PR body read from stdin (CI)
   check-attribution strip <file>      remove the lines from a commit message (commit-msg hook)
   check-attribution author            fail if the configured author is Claude (pre-commit hook)
+  check-attribution pre-push          check the commits a push sends, read from stdin (pre-push hook)
 
 A public repository passes --public before the command (its workflow and
 hooks do). Its history must not show the private planning behind it either:
 no Dispatch: trailer (the planning repository links work through prs: on
-the dispatch doc), no Claude project thread link, no path into a planning
-repository's projects/, and nothing matching a pattern in $PUBLIC_DENY or
-git config attribution.deny (one regular expression per line or value,
-kept out of the repository; CI passes them from a secret).
+the dispatch doc), no Claude project thread link, and no path into a
+planning repository's projects/.
+
+Where a planning checkout is found ($ORDVIK_PLANNING, else planning/ beside
+this checkout, else ~/.cache/ordvik/planning), --public also refuses the
+private names it holds, in commit messages and in the lines a commit adds:
+each project that owns no public repository, each owned repository not
+marked public: true, the planning repository itself, and the regular
+expressions in planning.yml's public_deny. The list stays in the private
+planning repository, and the check runs before a push leaves the machine
+(pre-push); CI has no planning checkout and runs the generic checks only, so
+nothing private is printed in a public log.
 """
 
 import os
@@ -49,18 +58,67 @@ PUBLIC_ANYWHERE = [
 
 PUBLIC = " or names the private planning behind this public repository"
 WHAT = ""
+# Private names from the planning checkout, checked in messages and in the
+# lines a commit adds.
+DENY = []
+
+
+def planning_checkout():
+    """The planning repository's checkout, or None."""
+    top = subprocess.run(["git", "worktree", "list", "--porcelain"], capture_output=True, text=True).stdout
+    main = top.split("\n", 1)[0].removeprefix("worktree ") if top.startswith("worktree ") else os.getcwd()
+    for d in (os.environ.get("ORDVIK_PLANNING"), os.path.join(os.path.dirname(main), "planning"),
+              os.path.expanduser("~/.cache/ordvik/planning")):
+        if d and os.path.isfile(os.path.join(d, "planning.yml")):
+            return d
+    return None
+
+
+def word(name):
+    return re.compile(r"(?<![\w.-])" + re.escape(name) + r"(?![\w-])", re.I)
+
+
+def planning_deny(path):
+    """The private names a planning checkout holds, as patterns."""
+    import yaml
+    deny = []
+    with open(os.path.join(path, "planning.yml")) as f:
+        conf = yaml.safe_load(f) or {}
+    deny += [re.compile(p, re.I) for p in conf.get("public_deny") or []]
+    remote = subprocess.run(["git", "-C", path, "remote", "get-url", "origin"], capture_output=True, text=True).stdout
+    m = re.search(r"[:/]([^/:\s]+/[^/:\s]+?)(?:\.git)?/?\s*$", remote)
+    if m:
+        deny.append(word(m.group(1)))
+    projects = os.path.join(path, "projects")
+    for name in sorted(os.listdir(projects)) if os.path.isdir(projects) else []:
+        try:
+            with open(os.path.join(projects, name, "project.yml")) as f:
+                proj = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            continue
+        public = False
+        for e in proj.get("owns") or []:
+            repo, pub = (e.get("repo"), e.get("public")) if isinstance(e, dict) else (e, False)
+            public = public or bool(pub)
+            if repo and not pub:
+                deny.append(word(str(repo)))
+        if not public:
+            deny.append(word(str(proj.get("project") or name)))
+    return deny
 
 
 def public_mode():
-    """Turn on the public checks."""
+    """Turn on the public checks, and the planning checkout's names if there is one."""
     global WHAT
     WHAT = PUBLIC
     LINES.extend(PUBLIC_LINES)
     ANYWHERE.extend(PUBLIC_LINES + PUBLIC_ANYWHERE)
-    deny = os.environ.get("PUBLIC_DENY", "").splitlines()
-    r = subprocess.run(["git", "config", "--get-all", "attribution.deny"], capture_output=True, text=True)
-    deny += r.stdout.splitlines()
-    ANYWHERE.extend(re.compile(d.strip(), re.I) for d in deny if d.strip())
+    path = planning_checkout()
+    if path:
+        try:
+            DENY.extend(planning_deny(path))
+        except ImportError:
+            print("check-attribution: PyYAML is not installed; private names are not checked", file=sys.stderr)
 
 
 def findings(text):
@@ -68,6 +126,21 @@ def findings(text):
     for n, line in enumerate(text.splitlines(), 1):
         if any(p.search(line) for p in LINES) or any(p.search(line) for p in ANYWHERE):
             out.append(f"line {n}: {line.strip()}")
+        elif any(p.search(line) for p in DENY):
+            out.append(f"line {n}: names something private")
+    return out
+
+
+def added(sha):
+    """Lines the commit adds that name something private."""
+    if not DENY:
+        return []
+    out, path = [], ""
+    for line in git("show", "--format=", "--unified=0", "--no-color", sha).splitlines():
+        if line.startswith("+++ "):
+            path = line[6:] if line.startswith("+++ b/") else line[4:]
+        elif line.startswith("+") and any(p.search(line) for p in DENY):
+            out.append(f"{path}: adds a line that names something private")
     return out
 
 
@@ -84,9 +157,9 @@ def git(*args):
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
-def cmd_commits(rng):
+def cmd_commits(*rng):
     bad = 0
-    for sha in git("rev-list", "--no-merges", rng).split():
+    for sha in git("rev-list", "--no-merges", *rng).split():
         an, ae, cn, ce = git("log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce", sha).strip().split("\0")
         problems = []
         if AUTHOR.search(ae) or AUTHOR.search(an):
@@ -94,6 +167,7 @@ def cmd_commits(rng):
         if AUTHOR.search(ce) or AUTHOR.search(cn):
             problems.append(f"committer {cn} <{ce}>")
         problems += findings(git("log", "-1", "--format=%B", sha))
+        problems += added(sha)
         for p in problems:
             print(f"{sha[:10]}: {p}")
         bad += bool(problems)
@@ -112,6 +186,20 @@ def cmd_body():
         print(f"\nThe PR body carries Claude attribution{WHAT}; edit it out"
               + ("." if WHAT else " (the projects attribution header is fine)."))
     return 1 if problems else 0
+
+
+def cmd_pre_push(stdin):
+    """Check what a push sends: each line is <local ref> <sha> <remote ref> <sha>."""
+    bad = 0
+    for line in stdin.read().splitlines():
+        parts = line.split()
+        if len(parts) != 4 or set(parts[1]) == {"0"}:
+            continue  # a delete
+        local, remote = parts[1], parts[3]
+        rng = local if set(remote) == {"0"} else f"{remote}..{local}"
+        args = [rng, "--not", "--remotes"] if set(remote) == {"0"} else [rng]
+        bad |= cmd_commits(*args)
+    return bad
 
 
 def cmd_strip(path):
@@ -147,6 +235,8 @@ def main(argv):
         return cmd_strip(argv[1])
     if argv == ["author"]:
         return cmd_author()
+    if argv == ["pre-push"]:
+        return cmd_pre_push(sys.stdin)
     print(__doc__, file=sys.stderr)
     return 2
 

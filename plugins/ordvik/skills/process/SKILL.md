@@ -159,7 +159,9 @@ The repo's `AGENTS.md` names its actual hosts for each row.
   (`ordvik planning link <project>/<id> --pr <owner/name#n> --task <n>` or
   `--done`). The code repository's commits, branches, PR bodies and code
   never name a dispatch, plan or the planning repository; a repository
-  marked `public: true` in its `project.yml` enforces it.
+  marked `public: true` in its `project.yml` enforces it: its pre-push hook
+  refuses a push that names another project, a repository not marked public,
+  the planning repository, or a pattern in `planning.yml`'s `public_deny`.
 - **Attribution.** Commits are authored by the operator. Follow the repo's
   attribution rule exactly; where it forbids AI attribution, set the git
   identity to the operator before the first commit and remove any footer a
