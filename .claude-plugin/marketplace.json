@@ -9,7 +9,8 @@
       "name": "ordvik",
       "description": "Agent toolkit — planning model, RFC management, dispatch documents, and reporting",
       "source": "./plugins/ordvik",
-      "category": "development"
+      "category": "development",
+      "license": "Apache-2.0"
     }
   ]
 }

@@ -98,3 +98,7 @@ Skills check for project-local convention files at well-known paths, falling bac
 From Latin *ordo* (order, arrangement) and Old Norse *vik* (inlet, harbor) — "ordered harbor," a structured place where work is organized and dispatched from.
 
 The name follows a pattern used across the family of projects: compound words formed from stems across languages, aiming for unique, short, and evocative.
+
+## License
+
+Copyright 2026 Ken Fox. Licensed under the [Apache License, Version 2.0](LICENSE).
