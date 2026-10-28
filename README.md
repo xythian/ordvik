@@ -43,6 +43,10 @@ ordvik planning asks [--json] [--project <p>]      # what waits on the operator
 ordvik planning projects                           # projects and their repositories
 ordvik planning link <project>/<id> --pr <owner/name#n> [--task <n>]... [--done]
                                                    # record a PR on its dispatch doc
+ordvik planning ask new --project <p> --question <q> --option "label=then"... --recommended <n>
+                                                   # ask the operator to decide, pushed to git
+ordvik planning ask show|wait <id>                 # read the answer back
+ordvik planning ask answer <id> <n|other>          # record the operator's answer
 ```
 
 `ordvik plan ...` and `ordvik asks ...` take the same arguments and print
@@ -62,6 +66,7 @@ the same output as `scripts/plan` and `scripts/asks`, whose own tests
 | `/ordvik:planning` | Planning sessions — review threads, triage backlog, close plans | Planning |
 | `/ordvik:verify` | Review completed work for a thread or a plan | Planning |
 | `/ordvik:garden` | Gardening dispatch templates for codebase surveys | Planning |
+| `/ordvik:ask` | Ask the operator for a decision in one call: options, a recommendation, the answer read back from git | Planning |
 | `/ordvik:asks` | Everything waiting on the operator: decide, review, do; recurring steps to automate | Planning |
 | `/ordvik:research` | Conduct and record structured research — standalone docs or RFC appendices | Core |
 | `/ordvik:name` | Generate names by combining stems from real languages | Utility |

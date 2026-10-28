@@ -160,7 +160,12 @@ def dispatch_gates(root, ref):
             meta, body = plan.loose_frontmatter(text)
             meta["human_gates"] = None
         marks = task_marks(body)
-        entries = [str(g) for g in as_list_raw(meta.get("human_gates"))]
+        # A gate is a string, or a mapping whose `ask` is that string (with
+        # options; `ordvik planning ask` writes these). An answered one is
+        # not waiting on the operator.
+        entries = [str(g.get("ask") or "") if isinstance(g, dict) else str(g)
+                   for g in as_list_raw(meta.get("human_gates"))
+                   if not (isinstance(g, dict) and g.get("answered"))]
         gate_tasks = set()
         parsed = []
         for g in entries:

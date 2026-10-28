@@ -29,7 +29,12 @@ missed, and it turns kinds of steps that keep recurring into candidates
 for automation.
 
 Read `references/asks.md` for the full design: what counts, where asks
-come from, the ask file format, and how recurring asks become commands.
+come from, the ask file format, the decision shape (options and a
+recommendation), and how recurring asks become commands.
+
+To **raise** a decision for the operator (a thread that needs a choice),
+use `/ordvik:ask`: one `ordvik planning ask new` call writes the ask with
+its options and pushes it, and `ask show`/`ask wait` read the answer.
 
 Requires `scripts/asks` (and `scripts/plan`, which it imports) in the
 repo. If they are missing, offer to copy both from
@@ -102,7 +107,9 @@ Run `scripts/asks check` before committing.
 
 ## answer
 
-Add `answered: YYYY-MM-DD`, `outcome:` (`done`, `decided`, `rejected`,
+For an ask with options (a file or a gate), record the operator's choice
+with `ordvik planning ask answer <id> <n|other> [--text ...]`, which writes
+the fields, archives a file and pushes. Otherwise, add `answered: YYYY-MM-DD`, `outcome:` (`done`, `decided`, `rejected`,
 `automate` or `dropped`) and `answer:` (one line, with a link to whatever
 records the result). Then `git mv` the file to `<planning>/asks/archive/`.
 For `automate`, the answer names the backlog item or dispatch that will

@@ -104,6 +104,24 @@ class AsksTest(unittest.TestCase):
         code, out = self.run_asks("status")
         self.assertIn("*302 Task 3", out)
 
+    def test_a_gate_written_as_a_mapping_is_an_ask_until_answered(self):
+        extra = textwrap.dedent("""\
+            human_gates:
+              - ask: "Task 2: Ship it behind a flag?"
+                options:
+                  - {label: "Flag", then: "ships off by default"}
+                  - {label: "Now", then: "ships on"}
+                recommended: 0
+              - ask: "Task 3: Which region first?"
+                options: [{label: "East", then: "e"}, {label: "West", then: "w"}]
+                answered: 2026-10-22
+                answer: 1""")
+        self.repo.commit_docs({"307": dispatch("307", tasks=3, executor="mixed", extra=extra)})
+        asks = self.asks()
+        self.assertEqual(set(asks), {"dispatch:307:2"})
+        self.assertEqual(asks["dispatch:307:2"]["text"], "Ship it behind a flag?")
+        self.assertEqual(self.check()[0], 0)
+
     def test_closed_and_archived_dispatches_are_skipped(self):
         self.repo.commit_docs({
             "303": gated("303", ["Task 1: Deploy"], status="done"),

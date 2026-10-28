@@ -93,6 +93,67 @@ with a link to whatever records the result), and `git mv` it to
 `<planning>/asks/archive/`. For `automate`, the answer names the
 backlog item or dispatch that will build the command.
 
+### The decision shape
+
+A decision is asked in one shape wherever it lives, so it can be answered
+with one tap: a question, two to four options, one recommended, and a few
+sentences of context. Ask files, dispatch gates and plan gates all take the
+same optional fields:
+
+```yaml
+ask: Ship the new parser behind a flag?
+kind: decide
+from: {thread: "Parser rewrite", pr: acme/app#12, dispatch: demo/20261028-parser}
+options:                     # 2 to 4
+  - {label: "Behind a flag", then: "the old parser stays the default for a week"}
+  - {label: "Replace now", then: "the old parser is deleted in this PR"}
+recommended: 0               # the option's index, from 0
+context: |
+  At most 120 words: why this is asked now and what each answer changes.
+```
+
+`from` is still allowed as plain text. A dispatch gate with the shape is a
+mapping whose `ask` is the gate's usual text:
+
+```yaml
+human_gates:
+  - "Task 2: Production rollout"          # a plain gate, as before
+  - ask: "Task 3: Ship the new parser behind a flag?"
+    options:
+      - {label: "Behind a flag", then: "..."}
+      - {label: "Replace now", then: "..."}
+    recommended: 0
+```
+
+A plan gate keeps its `id` and gains the same fields. An ask with options
+is a `decide` ask unless it names another `kind`.
+
+Once answered, the ask carries `answered:` (a date), `answer:` (the chosen
+option's index, or `other`), `answer_text:` (the operator's words; needed
+with `other`), and `answered_by:`. An answered ask file also has its
+`outcome:` and moves to `archive/`; an answered gate stays where it is and
+leaves the open list. Its dispatch task is still marked `— DONE` when the
+work is done, and a plan gate is still `passed:` by the plan's conductor.
+
+`ordvik planning ask` writes all of this, so agents do not edit the YAML
+by hand (`/ordvik:ask`):
+
+```bash
+ordvik planning ask new --project <p> --question "..." --option "label=then" --option "label=then" \
+  --recommended 0 --context "..." [--from-thread ... --from-pr owner/name#n --from-dispatch p/id]
+ordvik planning ask new --gate <p>/<dispatch>:<task> ...     # or --gate plan:<p>/<plan>:<gate>
+ordvik planning ask show <id> [--json]                       # the ask and its answer
+ordvik planning ask wait <id> [--timeout 15m]                # exit 0 answered, 3 still open
+ordvik planning ask answer <id> <n|other> [--text ...]       # record the operator's answer
+```
+
+Each command commits to the planning repository's `main` and pushes,
+starting again on the new tip when another writer got there first, so an
+agent needs nothing but a push to the planning repository to ask and to
+read the answer. An inbox that renders asks writes answers the same way.
+When `planning.yml` sets `ask_url` (with `{id}` for the ask's id), `ask new`
+prints the ask's link.
+
 Ask files come from whoever finds the ask: a thread that needs something
 it cannot put in its own dispatch doc, the conductor of a plan, or the
 weekly planning session. If an ask belongs to a doc, it goes in that doc.
@@ -104,8 +165,11 @@ A human gate goes in its dispatch doc, and a plan gate goes in its plan.
 scripts/asks status --fetch        # the queue: Decide, Review, Do, then deferred and candidates to automate
 scripts/asks status --json         # the same, for an agent
 scripts/asks status --all          # also list RFC drafts untouched for 60+ days
-scripts/asks check                 # validate ask files; warn about gate entries with no matching task
+scripts/asks check                 # validate ask files and the decision shape; warn about gate entries with no matching task
 ```
+
+`asks status --json` carries each ask's `options`, `recommended`,
+`context` and `from` when it has them.
 
 Within each kind, asks are ordered by how many plan threads they unblock,
 then by whether their dispatch's earlier tasks are all marked done, then by

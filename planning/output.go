@@ -81,6 +81,21 @@ func (a *Ask) MarshalJSON() ([]byte, error) {
 		o.Set("from", *a.From)
 	}
 	o.Set("unblocks", a.Unblocks).Set("raised", a.Raised).Set("age_days", a.AgeDays)
+	if len(a.Options) > 0 {
+		o.Set("options", a.Options).Set("recommended", a.Recommended)
+	}
+	if a.Context != "" {
+		o.Set("context", a.Context)
+	}
+	if a.Answered != nil {
+		o.Set("answered", *a.Answered).Set("answer", a.Answer)
+		if a.AnswerText != "" {
+			o.Set("answer_text", a.AnswerText)
+		}
+		if a.AnsweredBy != "" {
+			o.Set("answered_by", a.AnsweredBy)
+		}
+	}
 	return o.MarshalJSON()
 }
 
@@ -283,6 +298,17 @@ func PrintAsks(w io.Writer, res *AsksResult, ref, sha string, today time.Time, s
 			}
 			fmt.Fprintf(w, " %s%s %s  %s\n", flag, padRight(a.Label, width), padLeft(age, 5), pyStr(a.Text))
 			var extra []string
+			if len(a.Options) > 0 {
+				var opts []string
+				for i, o := range a.Options {
+					mark := ""
+					if a.Recommended != nil && *a.Recommended == i {
+						mark = " (recommended)"
+					}
+					opts = append(opts, fmt.Sprintf("%d %s%s", i, o.Label, mark))
+				}
+				extra = append(extra, strings.Join(opts, " / "))
+			}
 			if len(a.Unblocks) > 0 {
 				extra = append(extra, "unblocks "+strings.Join(a.Unblocks, ", "))
 			}

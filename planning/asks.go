@@ -106,6 +106,15 @@ type Ask struct {
 	Raised        *string   `json:"raised"`
 	AgeDays       *int      `json:"age_days"`
 
+	// The ask's shape (askshape.go), when it has one.
+	Options     []AskOption `json:"options,omitempty"`
+	Recommended *int        `json:"recommended,omitempty"`
+	Context     string      `json:"context,omitempty"`
+	Answered    *string     `json:"answered,omitempty"`
+	Answer      any         `json:"answer,omitempty"`
+	AnswerText  string      `json:"answer_text,omitempty"`
+	AnsweredBy  string      `json:"answered_by,omitempty"`
+
 	hasDeferred bool
 }
 
@@ -142,6 +151,7 @@ type gateEntry struct {
 	doc       *Doc
 	task      string // "" when the entry names no task
 	text      string
+	fields    map[string]any // the entry's mapping, when it is one
 	marks     map[string]bool
 	gateTasks map[string]bool
 }
@@ -193,20 +203,23 @@ func (v *View) dispatchGates(docs *Docs) []gateEntry {
 		}
 		marks := taskMarks(body)
 		gateTasks := map[string]bool{}
-		type parsed struct{ task, text string }
+		type parsed struct {
+			task, text string
+			fields     map[string]any
+		}
 		var ps []parsed
 		for _, e := range entries {
-			g := pyStr(e)
+			g, fields := gateFields(e)
 			m := gateTask.FindStringSubmatch(g)
 			task, text := "", g
 			if m != nil {
 				task, text = strings.ToUpper(m[1]), m[2]
 				gateTasks[task] = true
 			}
-			ps = append(ps, parsed{task, strings.TrimSpace(text)})
+			ps = append(ps, parsed{task, strings.TrimSpace(text), fields})
 		}
 		for _, p := range ps {
-			gates = append(gates, gateEntry{doc: doc, task: p.task, text: p.text, marks: marks, gateTasks: gateTasks})
+			gates = append(gates, gateEntry{doc: doc, task: p.task, text: p.text, fields: p.fields, marks: marks, gateTasks: gateTasks})
 		}
 	}
 	return gates
@@ -286,6 +299,11 @@ type RFCSource struct {
 
 // Gather lists every open ask. today is the date ages count to.
 func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only string) (*AsksResult, error) {
+	return v.gather(today, showAll, rfcs, only, false)
+}
+
+// gather is Gather, with answered asks too when answered is set.
+func (v *View) gather(today time.Time, showAll bool, rfcs []RFCSource, only string, answered bool) (*AsksResult, error) {
 	found, err := v.AllDocs(only)
 	if err != nil {
 		return nil, err
@@ -320,6 +338,10 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 		if g.task != "" && g.marks[g.task] {
 			continue
 		}
+		shape := parseShape(g.fields)
+		if shape.Answered != "" && !answered {
+			continue
+		}
 		unmarked := []string{}
 		if g.task != "" {
 			for n, done := range g.marks {
@@ -349,6 +371,18 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 			a.ID += ":" + g.task
 			a.Label += " Task " + g.task
 		}
+		if k, ok := get(g.fields, "kind").(string); ok && contains(askKinds, k) {
+			a.Kind = k
+		} else if len(shape.Options) > 0 {
+			a.Kind = "decide" // options are a decision, whatever the wording
+		}
+		if c := get(g.fields, "category"); c != nil {
+			a.Categories = asStrings(c)
+		}
+		if from := get(g.fields, "from"); from != nil {
+			a.From = &from
+		}
+		a.setShape(shape)
 		var title any
 		if doc.Title != nil {
 			title = *doc.Title
@@ -364,6 +398,11 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 	for _, p := range plans {
 		threads := p.Evaluate(docs, map[string]bool{}, false)
 		for _, pg := range p.PendingGates(threads) {
+			raw, _ := p.Gates.Get(pg.ID)
+			shape := parseShape(raw)
+			if shape.Answered != "" && !answered {
+				continue
+			}
 			where := p.Path
 			if filepath.IsAbs(where) {
 				where, _ = filepath.Rel(v.Store.Root, where)
@@ -386,6 +425,10 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 			if repo {
 				a.Project = p.Project
 			}
+			if from := get(raw, "from"); from != nil {
+				a.From = &from
+			}
+			a.setShape(shape)
 			res.Asks = append(res.Asks, a)
 		}
 	}
@@ -418,7 +461,7 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 		}
 		files, _ := v.askFiles(p)
 		for _, f := range files {
-			if f.answered {
+			if f.answered && !answered {
 				continue
 			}
 			m := f.meta
@@ -454,6 +497,7 @@ func (v *View) Gather(today time.Time, showAll bool, rfcs []RFCSource, only stri
 				s := pyStr(r)
 				a.Raised = &s
 			}
+			a.setShape(parseShape(m))
 			if repo {
 				a.Project = p.Name
 			}
@@ -672,6 +716,7 @@ func (v *View) CheckAsks(only string) (errors, warnings []string, err error) {
 					errors = append(errors, rel+": `defer_until` must be a date")
 				}
 			}
+			errors = append(errors, checkShape(m, rel)...)
 			if a.answered {
 				if _, ok := asDate(get(m, "answered")); !ok {
 					errors = append(errors, rel+": `answered` must be a date")
@@ -679,7 +724,7 @@ func (v *View) CheckAsks(only string) (errors, warnings []string, err error) {
 				if o, ok := get(m, "outcome").(string); !ok || !contains(askOutcomes, o) {
 					errors = append(errors, fmt.Sprintf("%s: an answered ask needs outcome, one of %s", rel, strings.Join(askOutcomes, ", ")))
 				}
-				if strings.TrimSpace(pyStr(orDefault(get(m, "answer"), ""))) == "" {
+				if _, hasOptions := m["options"]; !hasOptions && strings.TrimSpace(pyStr(orDefault(get(m, "answer"), ""))) == "" {
 					errors = append(errors, rel+": an answered ask needs `answer`")
 				}
 				if !a.archived {
@@ -699,10 +744,32 @@ func (v *View) CheckAsks(only string) (errors, warnings []string, err error) {
 		if doc.Status != "active" && doc.Status != "" {
 			continue
 		}
+		if g.fields != nil {
+			where := doc.Path + ": human gate " + pyStrRepr(g.text)
+			if strings.TrimSpace(g.text) == "" {
+				errors = append(errors, doc.Path+": a human gate written as a mapping needs `ask`")
+			}
+			if k, ok := g.fields["kind"]; ok && !contains(askKinds, strOf(k)) {
+				errors = append(errors, fmt.Sprintf("%s: kind %s is not one of %s", where, pyRepr(k), strings.Join(askKinds, ", ")))
+			}
+			errors = append(errors, checkShape(g.fields, where)...)
+		}
 		if g.task == "" {
 			warnings = append(warnings, fmt.Sprintf("%s: human gate %s names no task (\"Task N: ...\")", doc.Path, pyStrRepr(g.text)))
 		} else if _, ok := g.marks[g.task]; !ok {
 			warnings = append(warnings, fmt.Sprintf("%s: human gate names Task %s, which has no `## Task` heading", doc.Path, g.task))
+		}
+	}
+	plans, err := v.ActivePlans()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, p := range plans {
+		if only != "" && p.Project != only {
+			continue
+		}
+		for _, id := range p.Gates.keys {
+			errors = append(errors, checkShape(p.Gates.byID[id], p.Path+": gate "+id)...)
 		}
 	}
 	return errors, warnings, nil
