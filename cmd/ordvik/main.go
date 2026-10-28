@@ -397,6 +397,7 @@ func check(view *planning.View, o opts, stdout, stderr io.Writer) int {
 	if len(o.args) == 0 {
 		errors, warnings := planning.CheckIDs(found, home(view))
 		errors = append(errors, planning.CheckPRs(found)...)
+		errors = append(errors, planning.CheckRouting(found)...)
 		if view.Store.Layout == planning.LayoutRepo {
 			errors = append(errors, planning.CheckProjects(view.Projects)...)
 		}

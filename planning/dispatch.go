@@ -3,6 +3,7 @@ package planning
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,6 +71,9 @@ type Doc struct {
 	Repo      string
 	Branch    any
 	Executor  string
+	Harness   string // the agent harness that runs it: claude (when unset), codex, antigravity
+	Model     string // a model for that harness, "" for its default
+	Kind      string // the kind of work: build, batch, review, research, triage
 	Status    string
 	Plan      any
 	Wave      any
@@ -148,6 +152,9 @@ func ParseDoc(layout, project, p, text string) *Doc {
 	}
 	d.Branch = get(meta, "branch")
 	d.Executor = strings.ToLower(pyStr(getOr(meta, "executor", "")))
+	d.Harness = strings.ToLower(strings.TrimSpace(pyStr(getOr(meta, "harness", ""))))
+	d.Model = strings.TrimSpace(pyStr(getOr(meta, "model", "")))
+	d.Kind = strings.ToLower(strings.TrimSpace(pyStr(getOr(meta, "kind", ""))))
 	d.Status = strings.ToLower(pyStr(orDefault(get(meta, "status"), "active")))
 	d.Plan = get(meta, "plan")
 	d.Wave = get(meta, "wave")
@@ -277,6 +284,39 @@ func (d *Docs) All() []*Doc {
 		out[i] = d.byID[k]
 	}
 	return out
+}
+
+// Harnesses are the values `harness:` takes; a doc without one runs on
+// Claude Code.
+var Harnesses = []string{"claude", "codex", "antigravity"}
+
+// Kinds are the values `kind:` takes.
+var Kinds = []string{"build", "batch", "review", "research", "triage"}
+
+// HarnessName is the harness that runs the doc: its `harness:`, else claude.
+func (d *Doc) HarnessName() string {
+	if d.Harness == "" {
+		return "claude"
+	}
+	return d.Harness
+}
+
+// CheckRouting is an error for each active doc whose `harness:` or `kind:`
+// is not one of the known values.
+func CheckRouting(found []*Doc) []string {
+	var errors []string
+	for _, d := range found {
+		if d.Archived {
+			continue
+		}
+		if d.Harness != "" && !slices.Contains(Harnesses, d.Harness) {
+			errors = append(errors, fmt.Sprintf("%s: harness %q is not one of %s", d.Path, d.Harness, strings.Join(Harnesses, ", ")))
+		}
+		if d.Kind != "" && !slices.Contains(Kinds, d.Kind) {
+			errors = append(errors, fmt.Sprintf("%s: kind %q is not one of %s", d.Path, d.Kind, strings.Join(Kinds, ", ")))
+		}
+	}
+	return errors
 }
 
 // CheckIDs: two active docs with one id are an error; an active doc
