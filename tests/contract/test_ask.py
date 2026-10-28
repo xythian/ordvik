@@ -200,6 +200,24 @@ class AskTest(unittest.TestCase):
         self.assertIn("already answered", out)
         self.assertEqual(self.run_cmd("asks", "check")[0], 0)
 
+    def test_defer_takes_an_ask_off_the_queue_until_its_date(self):
+        ident = self.new("--project", "demo")
+        code, out = self.run_cmd("ask", "defer", ident, "2026-10-28", "--today", "2026-10-28")
+        self.assertEqual(code, 1, out)
+        self.assertIn("after today", out)
+        self.ok("ask", "defer", ident, "2026-11-02", "--today", "2026-10-28")
+        self.assertIn("\ndefer_until: 2026-11-02\n---",
+                      self.remote_show("projects/demo/asks/ship-the-parser-behind-a-flag.md"))
+        self.assertEqual(self.asks()[ident]["state"], "deferred")
+        self.ok("ask", "defer", ident, "2026-11-05", "--today", "2026-10-28")
+        text = self.remote_show("projects/demo/asks/ship-the-parser-behind-a-flag.md")
+        self.assertEqual(text.count("defer_until:"), 1)
+        self.assertIn("defer_until: 2026-11-05", text)
+        code, out = self.run_cmd("ask", "defer", "dispatch:demo/20261028-parser:2", "2026-11-02")
+        self.assertEqual(code, 1, out)
+        self.assertIn("only an ask file", out)
+        self.assertEqual(self.run_cmd("asks", "check")[0], 0)
+
     def test_wait_returns_on_answer_and_times_out_otherwise(self):
         ident = self.new("--project", "demo")
         code, out = self.run_cmd("ask", "wait", ident, "--timeout", "1s", "--interval", "200ms")

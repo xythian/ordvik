@@ -346,6 +346,58 @@ func (s *Store) AnswerAsk(a AskAnswer) (string, error) {
 	return id, err
 }
 
+// DeferAsk sets an ask file's defer_until, so it leaves the queue until
+// then (the operator's "later"), and pushes it. Gates have no deferral.
+func (s *Store) DeferAsk(id string, until, today time.Time) (string, error) {
+	r, err := parseAskRef(id)
+	if err != nil {
+		return "", err
+	}
+	if r.source != "ask" {
+		return "", fmt.Errorf("only an ask file can be deferred, not %s", r.id())
+	}
+	if !until.After(today) {
+		return "", fmt.Errorf("defer to a date after today (%s)", isoDate(today))
+	}
+	var ref string
+	_, err = s.Publish("defer "+r.id()+" to "+isoDate(until), func(v *View) ([]string, error) {
+		for _, p := range v.Projects {
+			if r.project != "" && p.Name != r.project {
+				continue
+			}
+			rel := p.AsksDir() + "/" + r.name + ".md"
+			text, ok, err := v.Files.Read(rel)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			ref = askRef{source: "ask", project: p.Name, name: r.name}.id()
+			lines, end, err := frontmatter(text)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %v", rel, err)
+			}
+			line := "defer_until: " + isoDate(until)
+			replaced := false
+			for i := 1; i < end; i++ {
+				if strings.HasPrefix(lines[i], "defer_until:") {
+					lines[i], replaced = line, true
+				}
+			}
+			if !replaced {
+				lines = append(lines[:end], append([]string{line}, lines[end:]...)...)
+			}
+			if err := writeFile(v.Store.Root, rel, strings.Join(lines, "\n")); err != nil {
+				return nil, err
+			}
+			return []string{rel}, nil
+		}
+		return nil, fmt.Errorf("no open ask %s", r.id())
+	})
+	return ref, err
+}
+
 // answerNodes sets the answer's fields on m, the node of an ask whose
 // decoded fields are meta.
 func answerNodes(m *yaml.Node, meta map[string]any, a AskAnswer) error {
