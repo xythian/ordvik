@@ -26,6 +26,17 @@ Usage:
   ordvik planning projects [--json]        The projects and their repositories
   ordvik planning link <project>/<id> --pr <owner/name#n> [--task <n>]... [--done]
                                            Record a PR on a dispatch doc and push the planning repository
+  ordvik planning ask new --project <p> --question <q> --option "label=then"... --recommended <n>
+                          [--context <text>] [--kind decide|review|approve|do] [--category <c>]...
+                          [--from-thread <t>] [--from-pr <owner/name#n>] [--from-dispatch <p>/<id>]
+                          [--gate <p>/<dispatch>:<task> | --gate plan:<p>/<plan>:<gate>]
+                                           Ask the operator: write the ask (2 to 4 options, one
+                                           recommended, index from 0) and push the planning repository
+  ordvik planning ask show <id> [--json]   The ask and its answer
+  ordvik planning ask wait <id> [--timeout 15m] [--interval 30s]
+                                           Fetch until the ask is answered (exit 0) or the timeout passes (exit 3)
+  ordvik planning ask answer <id> <n|other> [--text <words>] [--by <name>] [--outcome <o>]
+                                           Record the operator's answer and push it
 
 A dispatch's tasks are done once a PR linked to them (prs:) has merged, and
 the dispatch once a PR linked with --done has merged and no human gate is
@@ -48,7 +59,12 @@ and ask files from the working tree.
 
 ordvik plan ... and ordvik asks ... are scripts/plan and scripts/asks.
 
-Exit status: 0, 1 on errors (check finds any, or the store cannot be read), 2 on bad usage.
+An ask id is what asks --json prints: ask:<project>/<slug> (or <project>/<slug>,
+or the bare slug), dispatch:<project>/<id>:<task> (or <project>/<id>:<task>),
+plan:<project>/<plan>:<gate>.
+
+Exit status: 0, 1 on errors (check finds any, or the store cannot be read), 2 on bad usage,
+3 when ask wait times out.
 `
 
 type opts struct {
@@ -65,10 +81,27 @@ type opts struct {
 	tasks    []int
 	done     bool
 	args     []string
+
+	// ask
+	question    string
+	options     []string
+	recommended string
+	context     string
+	kind        string
+	categories  []string
+	fromThread  string
+	fromPR      string
+	fromDisp    string
+	gate        string
+	timeout     time.Duration
+	interval    time.Duration
+	text        string
+	by          string
+	outcome     string
 }
 
 func parse(argv []string) (opts, error) {
-	var o opts
+	o := opts{timeout: 15 * time.Minute, interval: 30 * time.Second}
 	for i := 0; i < len(argv); i++ {
 		a := argv[i]
 		takes := func() (string, error) {
@@ -97,6 +130,54 @@ func parse(argv []string) (opts, error) {
 				}
 				o.tasks = append(o.tasks, n)
 			}
+		case "--question":
+			o.question, err = takes()
+		case "--option":
+			var v string
+			if v, err = takes(); err == nil {
+				o.options = append(o.options, v)
+			}
+		case "--recommended":
+			o.recommended, err = takes()
+		case "--context":
+			o.context, err = takes()
+		case "--kind":
+			o.kind, err = takes()
+		case "--category":
+			var v string
+			if v, err = takes(); err == nil {
+				for _, c := range strings.Split(v, ",") {
+					if c = strings.TrimSpace(c); c != "" {
+						o.categories = append(o.categories, c)
+					}
+				}
+			}
+		case "--from-thread":
+			o.fromThread, err = takes()
+		case "--from-pr":
+			o.fromPR, err = takes()
+		case "--from-dispatch":
+			o.fromDisp, err = takes()
+		case "--gate":
+			o.gate, err = takes()
+		case "--timeout", "--interval":
+			var v string
+			if v, err = takes(); err == nil {
+				var d time.Duration
+				if d, err = time.ParseDuration(v); err != nil || d < 0 {
+					err = fmt.Errorf("%s takes a duration, such as 30s or 15m", a)
+				} else if a == "--timeout" {
+					o.timeout = d
+				} else {
+					o.interval = d
+				}
+			}
+		case "--text":
+			o.text, err = takes()
+		case "--by":
+			o.by, err = takes()
+		case "--outcome":
+			o.outcome, err = takes()
 		case "--done":
 			o.done = true
 		case "--no-prs":
@@ -179,6 +260,9 @@ func planningCmd(argv []string, stdout, stderr io.Writer, _ bool) int {
 	repo := store.Layout == planning.LayoutRepo
 	if cmd == "link" {
 		return link(store, o, stdout, stderr)
+	}
+	if cmd == "ask" {
+		return ask(store, o, stdout, stderr)
 	}
 	if o.fetch || (repo && !o.offline && o.ref == "" && !o.worktree && cmd != "check") {
 		if err := store.Git.Fetch(); err != nil {

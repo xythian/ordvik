@@ -246,7 +246,8 @@ func DerivePRs(found []*Doc, src PRSource) []string {
 func (d *Doc) gateTasks() map[int]bool {
 	out := map[int]bool{}
 	for _, e := range asList(get(d.Meta, "human_gates")) {
-		if m := gateTask.FindStringSubmatch(pyStr(e)); m != nil {
+		text, _ := gateFields(e)
+		if m := gateTask.FindStringSubmatch(text); m != nil {
 			if n, err := strconv.Atoi(m[1]); err == nil {
 				out[n] = true
 			}
@@ -259,7 +260,8 @@ func (d *Doc) gateTasks() map[int]bool {
 // doc's own status can close it.
 func (d *Doc) openUntaskedGate() bool {
 	for _, e := range asList(get(d.Meta, "human_gates")) {
-		if gateTask.FindStringSubmatch(pyStr(e)) == nil {
+		text, fields := gateFields(e)
+		if gateTask.FindStringSubmatch(text) == nil && parseShape(fields).Answered == "" {
 			return true
 		}
 	}
