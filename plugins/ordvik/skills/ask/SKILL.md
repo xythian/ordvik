@@ -105,3 +105,10 @@ An ask file gains `answered`, `answer`, `answer_text`, `answered_by` and
 `outcome: decided` and moves to `asks/archive/`; a gate gains the same
 fields in place. A dispatch gate's task is still marked `— DONE` when its
 work is done, and a plan gate is still `passed:` by the plan's conductor.
+
+When the operator says "later", defer an ask file to a date; it leaves the
+list until then (gates have no deferral):
+
+```bash
+ordvik planning ask defer <id> <YYYY-MM-DD>
+```

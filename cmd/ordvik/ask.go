@@ -15,7 +15,7 @@ var sleep = time.Sleep
 
 func ask(store *planning.Store, o opts, stdout, stderr io.Writer) int {
 	if len(o.args) == 0 {
-		fmt.Fprintln(stderr, "Error: ask takes new, show, wait or answer.")
+		fmt.Fprintln(stderr, "Error: ask takes new, show, wait, answer or defer.")
 		return 2
 	}
 	sub, args := o.args[0], o.args[1:]
@@ -38,8 +38,14 @@ func ask(store *planning.Store, o opts, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return askAnswer(store, o, args, stdout, stderr)
+	case "defer":
+		if len(args) != 2 {
+			fmt.Fprintln(stderr, "Error: ask defer takes an ask id and a date (YYYY-MM-DD).")
+			return 2
+		}
+		return askDefer(store, o, args, stdout, stderr)
 	}
-	fmt.Fprintf(stderr, "Error: ask takes new, show, wait or answer, not %q.\n", sub)
+	fmt.Fprintf(stderr, "Error: ask takes new, show, wait, answer or defer, not %q.\n", sub)
 	return 2
 }
 
@@ -205,5 +211,25 @@ func askAnswer(store *planning.Store, o opts, args []string, stdout, stderr io.W
 		return 1
 	}
 	fmt.Fprintf(stdout, "Answered %s and pushed.\n", id)
+	return 0
+}
+
+func askDefer(store *planning.Store, o opts, args []string, stdout, stderr io.Writer) int {
+	t, err := today(o)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 2
+	}
+	until, err := time.Parse("2006-01-02", args[1])
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %q is not a date (YYYY-MM-DD).\n", args[1])
+		return 2
+	}
+	id, err := store.DeferAsk(args[0], until, t)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Deferred %s to %s and pushed.\n", id, args[1])
 	return 0
 }

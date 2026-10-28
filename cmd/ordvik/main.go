@@ -37,6 +37,8 @@ Usage:
                                            Fetch until the ask is answered (exit 0) or the timeout passes (exit 3)
   ordvik planning ask answer <id> <n|other> [--text <words>] [--by <name>] [--outcome <o>]
                                            Record the operator's answer and push it
+  ordvik planning ask defer <id> <YYYY-MM-DD>
+                                           Take an ask file off the queue until that date and push it
 
 A dispatch's tasks are done once a PR linked to them (prs:) has merged, and
 the dispatch once a PR linked with --done has merged and no human gate is
