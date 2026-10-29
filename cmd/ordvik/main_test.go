@@ -413,6 +413,21 @@ func TestCheckPRsAndPublicRepos(t *testing.T) {
 	}
 }
 
+func TestCheckRouting(t *testing.T) {
+	r := planningRepo(t)
+	r.write(map[string]string{
+		"projects/platform/project.yml":                 "project: platform\nowns:\n  - acme/platform\n",
+		"projects/platform/dispatch/20261028-sweep.md":  dispatchDoc("20261028-sweep", "harness: codex\nkind: batch", 1),
+		"projects/platform/dispatch/20261028-survey.md": dispatchDoc("20261028-survey", "harness: gpt\nkind: chores", 1),
+	})
+	code, out := r.run("planning", "check")
+	if code != 1 || !strings.Contains(out, `20261028-survey.md: harness "gpt" is not one of claude, codex, antigravity`) ||
+		!strings.Contains(out, `20261028-survey.md: kind "chores" is not one of build, batch, review, research, triage`) ||
+		strings.Contains(out, "20261028-sweep.md") {
+		t.Fatalf("check: %d\n%s", code, out)
+	}
+}
+
 func TestLink(t *testing.T) {
 	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
 		"GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",

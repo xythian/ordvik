@@ -112,6 +112,9 @@ Field reference:
 | `wave` | no | Retired: older docs only. Do not add it; plans order threads |
 | `branch` | **yes** | Git branch name — launch scripts create a worktree with this branch |
 | `executor` | yes | `agent`, `human`, or `mixed` — launch scripts skip `human` threads |
+| `harness` | no | The agent harness a launcher runs it on: `claude` (the default when absent), `codex`, or `antigravity`. See Routing below |
+| `model` | no | A model for that harness, when not its default |
+| `kind` | no | The kind of work: `build`, `batch`, `review`, `research`, or `triage`. Decides the harness (Routing) and labels the session in usage records |
 | `scope` | no | Target scope name from `.ordvik.yml` (multi-scope repos only). Omit for single-scope repos or root-scope work. |
 | `source` | yes | Where this work comes from. Use scope-prefixed RFC refs in multi-scope repos (e.g., `RFC search/0069`). |
 | `status` | no | Lifecycle state: `active` (default, can be omitted), `done`, or `superseded`. See conventions doc for lifecycle rules. |
@@ -121,6 +124,20 @@ Field reference:
 | `platform` | no | `darwin`, `linux`, or `any` (default: `any`) — platform constraint |
 | `repo` | no | Cross-repo dispatch target (see below) |
 | `prs` | no | Planning repository only: the PRs that carry the work, each `{pr: "owner/name#n", tasks: [n, ...]}` or `{pr: ..., done: true}`. Written by `ordvik planning link`; see Linking PRs below |
+
+### Routing
+
+Each harness draws on its own subscription, so the choice spreads work across them. Pick `kind` first, then the harness it suggests:
+
+| `kind` | Work | `harness` |
+|--------|------|-----------|
+| `build` | Features and fixes that need design judgement, decision cards or ops steps | `claude` |
+| `batch` | Well-specified mechanical work with tests to check it: sweeps, renames, test backfills, doc gardening | `codex` |
+| `review` | A review pass over a diff or a document, by a model that did not write it | `codex` |
+| `research` | Surveys and reading: options, API docs, how something works. Output is a document | `antigravity` |
+| `triage` | Short diagnoses: a failing log, a stuck run | `antigravity` |
+
+The operator overrides by editing `harness`. Codex and Antigravity read `AGENTS.md`, not `CLAUDE.md`, so a dispatch routed to them must not depend on Claude-only instructions or skills. `ordvik planning check` refuses an unknown `harness` or `kind`.
 
 ### Linking PRs
 
@@ -332,6 +349,7 @@ Shared testing strategy across all tasks (unit, integration, regression).
    - Which scope does this target? (multi-scope repos only)
    - Does the work happen in a different repo? If so, gather `repo` fields (path, url, add_dirs).
    - Who executes? (agent, human, mixed)
+   - What kind of work is it, and so which harness runs it? (see Routing)
    - Are there platform constraints? (darwin, linux, any)
 
 4. **Research** — Before writing tasks, understand the codebase:
