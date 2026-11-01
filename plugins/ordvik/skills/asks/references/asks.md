@@ -177,7 +177,12 @@ age. The age is how long ago the dispatch doc or ask file was added, or how
 long an RFC at `considering` has been idle. Ages need full history, so the
 tool says when the clone is shallow.
 
-Kinds and categories of dispatch gates are inferred from the gate's
+A gate names its kind: as a mapping with `kind:` (`decide`, `review`,
+`approve` or `do`), or by starting with the verb (`Approve: ...`,
+`Do: ...`, `Review:`, `Verify:`, `Check:`, `Decide:`, `Choose:`). New
+gates should, because a dashboard can put each kind in its own lane: decisions,
+go-aheads, and the operator's hands-on steps. Otherwise kinds and
+categories of dispatch gates are inferred from the gate's
 wording, in order: devices, a console, a password manager, network grants
 and restore drills make it `do`; "accept", "confirm" and "design" make it
 `decide`; "review", "check" and "verify" make it `review`; "approve",
