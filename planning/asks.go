@@ -52,6 +52,14 @@ var kindRules = []struct {
 	{"do", regexp.MustCompile(`\b(run|runs|deploy|create|creates|install|rebuild|provision|clean up|add|adds|enter)\b`)},
 }
 
+// A gate that starts with its verb ("Approve: ...", "Do: ...") says its
+// kind, whatever else the wording mentions.
+var (
+	leadingVerb  = regexp.MustCompile(`^\s*(approve|decide|choose|review|verify|check|do)\s*:`)
+	leadingKinds = map[string]string{"approve": "approve", "decide": "decide", "choose": "decide",
+		"review": "review", "verify": "review", "check": "review", "do": "do"}
+)
+
 var categoryRules = []struct {
 	name string
 	rx   *regexp.Regexp
@@ -66,6 +74,9 @@ var categoryRules = []struct {
 
 func InferKind(text string) string {
 	low := strings.ToLower(text)
+	if m := leadingVerb.FindStringSubmatch(low); m != nil {
+		return leadingKinds[m[1]]
+	}
 	for _, r := range kindRules {
 		if r.rx.MatchString(low) {
 			return r.kind

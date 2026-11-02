@@ -120,7 +120,7 @@ Field reference:
 | `status` | no | Lifecycle state: `active` (default, can be omitted), `done`, or `superseded`. See conventions doc for lifecycle rules. |
 | `plan` | no | Slug of the dispatch plan this thread belongs to (`<planning>/plans/<slug>.md`) |
 | `depends_on` | no | Thread ids that must complete first. Leave it out when `plan` is set: the plan owns ordering |
-| `human_gates` | no | List of task descriptions that require human execution |
+| `human_gates` | no | List of task descriptions that require human execution. Start each with its kind's verb (`"Task 7: Approve: deploy ..."`, `"Task 3: Do: register the passkey ..."`) or write it as a mapping with `kind:`; see the asks skill |
 | `platform` | no | `darwin`, `linux`, or `any` (default: `any`) — platform constraint |
 | `repo` | no | Cross-repo dispatch target (see below) |
 | `prs` | no | Planning repository only: the PRs that carry the work, each `{pr: "owner/name#n", tasks: [n, ...]}` or `{pr: ..., done: true}`. Written by `ordvik planning link`; see Linking PRs below |

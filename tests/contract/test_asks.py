@@ -90,6 +90,16 @@ class AsksTest(unittest.TestCase):
         self.assertEqual(asks["dispatch:301:4"]["kind"], "approve")
         self.assertEqual(asks["dispatch:301:5"]["kind"], "review")
 
+    def test_a_leading_verb_says_the_kind(self):
+        self.repo.commit_docs({"306": gated("306", [
+            "Task 1: Do: run the parity check by hand",
+            "Task 2: Approve: restore drill onto a disposable host",
+            "Task 3: Verify: the production dashboard"], tasks=3)})
+        asks = self.asks()
+        self.assertEqual(asks["dispatch:306:1"]["kind"], "do")  # not review, for "parity check"
+        self.assertEqual(asks["dispatch:306:2"]["kind"], "approve")  # not do, for "restore"
+        self.assertEqual(asks["dispatch:306:3"]["kind"], "review")  # not approve, for "production"
+
     def test_approve_asks_are_not_automation_candidates(self):
         self.repo.commit_docs({str(n): gated(str(n), ["Task 1: Production rollout with fleet upgrade"])
                                for n in (340, 341, 342)})
