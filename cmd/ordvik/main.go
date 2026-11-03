@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,14 @@ Usage:
   ordvik planning projects [--json]        The projects and their repositories
   ordvik planning link <project>/<id> --pr <owner/name#n> [--task <n>]... [--done]
                                            Record a PR on a dispatch doc and push the planning repository
+  ordvik planning launch <project>/<id> [--harness <h>] [--by <name>]
+                                           Ask for a run of the dispatch: write its launch request and push it
+  ordvik planning launch <project>/<id> --clear [--in-place]
+                                           Clear the launch request (a driver, once it has launched)
+  ordvik planning message <project>/<id> --text <line> [--by <name>]
+                                           Queue a line for the dispatch's run, delivered at its next turn end
+  ordvik planning message <project>/<id> --delivered <message id> [--in-place]
+                                           Mark a message delivered (a driver, once the run has it)
   ordvik planning ask new --project <p> --question <q> --option "label=then"... --recommended <n>
                           [--context <text>] [--kind decide|review|approve|do] [--category <c>]...
                           [--from-thread <t>] [--from-pr <owner/name#n>] [--from-dispatch <p>/<id>]
@@ -39,6 +48,12 @@ Usage:
                                            Record the operator's answer and push it
   ordvik planning ask defer <id> <YYYY-MM-DD>
                                            Take an ask file off the queue until that date and push it
+
+launch and message are how a thread with no route to the workstation that
+runs dispatches starts a run and nudges it: whatever drives runs reads the
+request from the doc, asks the operator to launch it (or launches it at once
+for a kind planning.yml lists in auto_launch), and clears it. --in-place edits
+the working tree only, for a caller that commits the change itself.
 
 A dispatch's tasks are done once a PR linked to them (prs:) has merged, and
 the dispatch once a PR linked with --done has merged and no human gate is
@@ -100,6 +115,12 @@ type opts struct {
 	text        string
 	by          string
 	outcome     string
+
+	// launch, message
+	harness   string
+	clear     bool
+	delivered string
+	inPlace   bool
 }
 
 func parse(argv []string) (opts, error) {
@@ -180,6 +201,14 @@ func parse(argv []string) (opts, error) {
 			o.by, err = takes()
 		case "--outcome":
 			o.outcome, err = takes()
+		case "--harness":
+			o.harness, err = takes()
+		case "--delivered":
+			o.delivered, err = takes()
+		case "--clear":
+			o.clear = true
+		case "--in-place":
+			o.inPlace = true
 		case "--done":
 			o.done = true
 		case "--no-prs":
@@ -265,6 +294,12 @@ func planningCmd(argv []string, stdout, stderr io.Writer, _ bool) int {
 	}
 	if cmd == "ask" {
 		return ask(store, o, stdout, stderr)
+	}
+	if cmd == "launch" {
+		return launch(store, o, stdout, stderr)
+	}
+	if cmd == "message" {
+		return message(store, o, stdout, stderr)
 	}
 	if o.fetch || (repo && !o.offline && o.ref == "" && !o.worktree && cmd != "check") {
 		if err := store.Git.Fetch(); err != nil {
@@ -400,6 +435,8 @@ func check(view *planning.View, o opts, stdout, stderr io.Writer) int {
 		errors, warnings := planning.CheckIDs(found, home(view))
 		errors = append(errors, planning.CheckPRs(found)...)
 		errors = append(errors, planning.CheckRouting(found)...)
+		errors = append(errors, planning.CheckLaunches(found)...)
+		errors = append(errors, planning.CheckAutoLaunch(view.AutoLaunch())...)
 		if view.Store.Layout == planning.LayoutRepo {
 			errors = append(errors, planning.CheckProjects(view.Projects)...)
 		}
@@ -535,5 +572,100 @@ func link(store *planning.Store, o opts, stdout, stderr io.Writer) int {
 		return 0
 	}
 	fmt.Fprintf(stdout, "Linked %s on %s and pushed.\n", l.Ref(), path)
+	return 0
+}
+
+// requester is --by, else the checkout's git user.name.
+func requester(store *planning.Store, o opts) string {
+	if o.by != "" {
+		return o.by
+	}
+	out, err := exec.Command("git", "-C", store.Root, "config", "user.name").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func launch(store *planning.Store, o opts, stdout, stderr io.Writer) int {
+	if len(o.args) != 1 || (o.clear && (o.harness != "" || o.by != "")) || (o.inPlace && !o.clear) {
+		fmt.Fprintln(stderr, "Error: launch takes <project>/<id> and [--harness <h>] [--by <name>], or --clear [--in-place].")
+		return 2
+	}
+	key := o.args[0]
+	if o.clear {
+		edit := func(d *planning.Doc) (string, string, error) {
+			text, err := planning.SetLaunch(d.Text, nil)
+			return text, key + ": clear the launch request", err
+		}
+		write := store.EditDoc
+		if o.inPlace {
+			write = store.EditDocInPlace
+		}
+		path, changed, err := write(key, edit)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			return 1
+		}
+		if !changed {
+			fmt.Fprintf(stdout, "%s has no launch request.\n", path)
+		} else if o.inPlace {
+			fmt.Fprintf(stdout, "Cleared the launch request on %s.\n", path)
+		} else {
+			fmt.Fprintf(stdout, "Cleared the launch request on %s and pushed.\n", path)
+		}
+		return 0
+	}
+	l := planning.LaunchRequest{Harness: strings.ToLower(strings.TrimSpace(o.harness)), RequestedBy: requester(store, o)}
+	if l.Harness == "claude-code" {
+		l.Harness = "claude"
+	}
+	path, err := store.RequestLaunch(key, l, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Requested a launch of %s on %s and pushed.\n", key, path)
+	return 0
+}
+
+func message(store *planning.Store, o opts, stdout, stderr io.Writer) int {
+	if len(o.args) != 1 || (o.text == "") == (o.delivered == "") || (o.inPlace && o.delivered == "") {
+		fmt.Fprintln(stderr, "Error: message takes <project>/<id> and --text <line> [--by <name>], or --delivered <message id> [--in-place].")
+		return 2
+	}
+	key := o.args[0]
+	if o.delivered != "" {
+		at := time.Now().UTC().Format(time.RFC3339)
+		edit := func(d *planning.Doc) (string, string, error) {
+			text, _, err := planning.MarkDelivered(d.Text, o.delivered, at)
+			return text, fmt.Sprintf("%s: message %s delivered", key, o.delivered), err
+		}
+		write := store.EditDoc
+		if o.inPlace {
+			write = store.EditDocInPlace
+		}
+		path, changed, err := write(key, edit)
+		if err != nil {
+			fmt.Fprintf(stderr, "Error: %v\n", err)
+			return 1
+		}
+		if !changed {
+			fmt.Fprintf(stdout, "%s: message %s was already delivered.\n", path, o.delivered)
+		} else {
+			fmt.Fprintf(stdout, "%s: marked message %s delivered.\n", path, o.delivered)
+		}
+		return 0
+	}
+	if err := planning.CheckMessageText(strings.TrimSpace(o.text)); err != nil {
+		fmt.Fprintf(stderr, "Error: %v.\n", err)
+		return 2
+	}
+	path, m, err := store.SendMessage(key, planning.Message{Text: o.text, From: requester(store, o)}, time.Now())
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Queued message %s for %s on %s and pushed.\n", m.ID, key, path)
 	return 0
 }

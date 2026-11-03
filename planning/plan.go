@@ -305,6 +305,10 @@ type ThreadState struct {
 	State      string            `json:"state"`
 	Milestones orderedMilestones `json:"milestones"`
 	Launched   *string           `json:"launched,omitempty"`
+	// Launch is the doc's launch request, Messages the lines queued for
+	// its run, delivered or not.
+	Launch   *LaunchRequest `json:"launch,omitempty"`
+	Messages []Message      `json:"messages,omitempty"`
 }
 
 type orderedMilestones []Milestone
@@ -354,6 +358,7 @@ func (pl *Plan) Evaluate(docs *Docs, branches map[string]bool, repoLayout bool) 
 			p := doc.Path
 			e.Doc = &p
 			e.TasksDone, e.Tasks = doc.TasksDone(), len(doc.Tasks)
+			e.Launch, e.Messages = doc.Launch, doc.Messages
 			if repoLayout {
 				e.Repo, e.Branch = doc.Repo, doc.BranchName()
 			}

@@ -471,3 +471,127 @@ func TestLink(t *testing.T) {
 		t.Fatalf("unknown doc: %d\n%s", code, out)
 	}
 }
+
+// A launch request and messages: written to the doc and pushed, shown by
+// status --json, cleared and marked delivered by a driver, and checked.
+func TestLaunchAndMessage(t *testing.T) {
+	for k, v := range map[string]string{"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
+		"GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
+		"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"} {
+		t.Setenv(k, v)
+	}
+	src := planningRepo(t)
+	src.commit(map[string]string{
+		"planning.yml": "version: 1\nauto_launch: [batch]\n",
+		"projects/game/dispatch/20261025-moo-h.md": dispatchDoc("20261025-moo-h", "plan: moo\nexecutor: human", 1),
+	})
+	base := t.TempDir()
+	remote := filepath.Join(base, "remote.git")
+	if out, err := exec.Command("git", "clone", "-q", "--bare", src.path, remote).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "clone", "-q", remote, filepath.Join(base, "planning")).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	r := &repo{t: t, path: filepath.Join(base, "planning")}
+	pushed := func() string {
+		t.Helper()
+		out, err := exec.Command("git", "-C", remote, "show", "main:projects/game/dispatch/20261025-moo-b.md").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+
+	if code, out := r.run("planning", "launch", "game/20261025-moo-b", "--harness", "codex", "--by", "conductor"); code != 0 {
+		t.Fatalf("launch: %d\n%s", code, out)
+	}
+	if doc := pushed(); !strings.Contains(doc, `launch: {harness: "codex", requested_by: "conductor", requested_at: "`) {
+		t.Fatalf("pushed doc:\n%s", doc)
+	}
+	if code, out := r.run("planning", "launch", "game/20261025-moo-b", "--harness", "aider"); code != 1 || !strings.Contains(out, `harness "aider"`) {
+		t.Errorf("unknown harness: %d\n%s", code, out)
+	}
+	if code, out := r.run("planning", "launch", "game/20261025-moo-h"); code != 1 || !strings.Contains(out, "executor: human") {
+		t.Errorf("a human doc: %d\n%s", code, out)
+	}
+	for _, text := range []string{"Rebase on main first.", `Then run "make test" & say: done?`} {
+		if code, out := r.run("planning", "message", "game/20261025-moo-b", "--text", text, "--by", "ken"); code != 0 {
+			t.Fatalf("message: %d\n%s", code, out)
+		}
+	}
+	if code, out := r.run("planning", "message", "game/20261025-moo-b", "--text", "two\nlines"); code != 2 || !strings.Contains(out, "one line") {
+		t.Errorf("two lines: %d\n%s", code, out)
+	}
+	doc := pushed()
+	if !strings.Contains(doc, "messages:\n  - {id: \"m1\", text: \"Rebase on main first.\", from: \"ken\", at: \"") ||
+		!strings.Contains(doc, `{id: "m2", text: "Then run \"make test\" & say: done?", from: "ken"`) {
+		t.Fatalf("pushed messages:\n%s", doc)
+	}
+
+	code, out := r.run("planning", "status", "game/moo", "--json", "--offline")
+	if code != 0 {
+		t.Fatalf("status: %d\n%s", code, out)
+	}
+	var data struct {
+		Threads []struct {
+			ID     string
+			Launch *struct {
+				Harness     string `json:"harness"`
+				RequestedBy string `json:"requested_by"`
+			}
+			Messages []struct{ ID, Text, From string }
+		}
+	}
+	if err := json.Unmarshal([]byte(dropNotes(out)), &data); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	for _, th := range data.Threads {
+		if th.ID == "20261025-moo-b" && (th.Launch == nil || th.Launch.Harness != "codex" || th.Launch.RequestedBy != "conductor" || len(th.Messages) != 2 || th.Messages[1].Text != `Then run "make test" & say: done?`) {
+			t.Errorf("status: %+v", th)
+		}
+	}
+	if code, out := r.run("planning", "check", "--offline"); code != 0 {
+		t.Errorf("check: %d\n%s", code, out)
+	}
+
+	// A driver clears the request and marks a message delivered, in place
+	// (it commits them with its own record), or pushed.
+	if code, out := r.run("planning", "launch", "game/20261025-moo-b", "--clear", "--in-place"); code != 0 || !strings.Contains(out, "Cleared") {
+		t.Fatalf("clear in place: %d\n%s", code, out)
+	}
+	local, _ := os.ReadFile(filepath.Join(r.path, "projects/game/dispatch/20261025-moo-b.md"))
+	if strings.Contains(string(local), "launch:") || !strings.Contains(pushed(), "launch:") {
+		t.Errorf("in place should edit the working tree only:\n%s", local)
+	}
+	r.git("checkout", "-q", "--", ".")
+	if code, out := r.run("planning", "message", "game/20261025-moo-b", "--delivered", "m1"); code != 0 {
+		t.Fatalf("delivered: %d\n%s", code, out)
+	}
+	if code, out := r.run("planning", "message", "game/20261025-moo-b", "--delivered", "m1"); code != 0 || !strings.Contains(out, "already delivered") {
+		t.Errorf("delivered twice: %d\n%s", code, out)
+	}
+	if code, out := r.run("planning", "message", "game/20261025-moo-b", "--delivered", "m9"); code != 1 || !strings.Contains(out, "no message m9") {
+		t.Errorf("an unknown message: %d\n%s", code, out)
+	}
+	if code, out := r.run("planning", "launch", "game/20261025-moo-b", "--clear"); code != 0 {
+		t.Fatalf("clear: %d\n%s", code, out)
+	}
+	doc = pushed()
+	if strings.Contains(doc, "launch:") || !strings.Contains(doc, `{id: "m1", text: "Rebase on main first.", from: "ken", at: "`) || !strings.Contains(doc, `delivered_at: "`) ||
+		strings.Count(doc, "delivered_at") != 1 {
+		t.Errorf("after the driver:\n%s", doc)
+	}
+
+	// check: a launch on a done doc, a bad message, an unknown auto_launch kind.
+	r.commit(map[string]string{
+		"planning.yml": "version: 1\nauto_launch: [batch, deploy]\n",
+		"projects/game/dispatch/20261025-moo-a.md": dispatchDoc("20261025-moo-a", "plan: moo\nrepo: acme/game-server\nstatus: done\nlaunch: {harness: claude}\nmessages:\n  - {id: m1}\n  - {id: m1, text: x}", 1, 1),
+	})
+	code, out = r.run("planning", "check")
+	for _, want := range []string{"launch requested, but the doc is done", "messages[0] (m1) has no text", "messages[1]: id m1 is used twice", `auto_launch kind "deploy"`} {
+		if code != 1 || !strings.Contains(out, want) {
+			t.Errorf("check wants %q: %d\n%s", want, code, out)
+		}
+	}
+}

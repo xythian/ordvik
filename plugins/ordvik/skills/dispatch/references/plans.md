@@ -198,7 +198,8 @@ The conductor never polls in a loop. It wakes on:
 | Where | How |
 |---|---|
 | A Claude project thread | Ask the coordinator to start a thread per doc, with the brief below |
-| A remote agent host | Whatever launches one dispatch there today, once per `ready` doc |
+| A workstation a driver runs dispatches on | `ordvik planning launch <project>/<id>` from any checkout of the planning repository, once per `ready` doc: the driver asks the operator for one tap (or launches a `kind` in `auto_launch` at once). No remote session on the operator's machine, and no route to the workstation, is needed |
+| A remote agent host with no driver | Whatever launches one dispatch there today, once per `ready` doc |
 | A local worktree | `scripts/wt launch $(scripts/plan ready <slug>) --claude` |
 
 The brief for an executing thread:
@@ -213,6 +214,11 @@ The brief for an executing thread:
 
 The milestones come from `scripts/plan status --json` (`milestones` on
 each thread).
+
+To nudge a thread a driver runs (a rebase, a changed plan, an answer it
+waits on), `ordvik planning message <project>/<id> --text "<one line>"`:
+the run reads it as its next message when its current turn ends. `status
+--json` shows each thread's `launch` request and `messages`.
 
 ## Changing the plan
 

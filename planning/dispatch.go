@@ -84,11 +84,16 @@ type Doc struct {
 	Archived  bool
 	PRs       []PRLink // the PRs that carry its work (prs:)
 	PRErrors  []string
-	DoneBy    string // "PR" when DerivePRs made it done
-	YAMLError string
-	Meta      map[string]any
-	Body      string
-	Text      string
+	// Launch is a launch request (`launch:`), Messages the lines queued
+	// for its run (`messages:`); LaunchErrors is what is wrong with them.
+	Launch       *LaunchRequest
+	Messages     []Message
+	LaunchErrors []string
+	DoneBy       string // "PR" when DerivePRs made it done
+	YAMLError    string
+	Meta         map[string]any
+	Body         string
+	Text         string
 }
 
 // Key is the doc's qualified id.
@@ -163,6 +168,7 @@ func ParseDoc(layout, project, p, text string) *Doc {
 	}
 	d.Archived = strings.Contains(p, "/archive/")
 	d.PRs, d.PRErrors = parsePRLinks(get(meta, "prs"))
+	d.Launch, d.Messages, d.LaunchErrors = parseLaunch(meta)
 	return d
 }
 
