@@ -43,6 +43,8 @@ ordvik planning asks [--json] [--project <p>]      # what waits on the operator
 ordvik planning projects                           # projects and their repositories
 ordvik planning link <project>/<id> --pr <owner/name#n> [--task <n>]... [--done]
                                                    # record a PR on its dispatch doc
+ordvik planning launch <project>/<id> [--harness <h>]   # ask for a run of the doc, pushed to git
+ordvik planning message <project>/<id> --text <line>    # a line for its run, at its next turn end
 ordvik planning ask new --project <p> --question <q> --option "label=then"... --recommended <n>
                                                    # ask the operator to decide, pushed to git
 ordvik planning ask show|wait <id>                 # read the answer back

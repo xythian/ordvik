@@ -124,6 +124,8 @@ Field reference:
 | `platform` | no | `darwin`, `linux`, or `any` (default: `any`) — platform constraint |
 | `repo` | no | Cross-repo dispatch target (see below) |
 | `prs` | no | Planning repository only: the PRs that carry the work, each `{pr: "owner/name#n", tasks: [n, ...]}` or `{pr: ..., done: true}`. Written by `ordvik planning link`; see Linking PRs below |
+| `launch` | no | Planning repository only: a request to run the doc, `{harness, requested_by, requested_at}`. Written by `ordvik planning launch`, cleared by whatever launches it; see Launching from a thread below |
+| `messages` | no | Planning repository only: lines queued for the doc's run, each `{id, text, from, at, delivered_at}`. Written by `ordvik planning message`; the driver sets `delivered_at` |
 
 ### Routing
 
@@ -151,6 +153,19 @@ ordvik planning link <project>/<id> --pr <owner/name#n> --done              # th
 Run it from the planning checkout right after opening the PR; it commits to the planning repository's `main` and pushes. A task is done once a PR that lists it merges; the dispatch is done once a PR linked with `--done` merges and every human gate is marked. Gates stay open until the operator's answer is recorded.
 
 Commits, branch names, PR titles and bodies, and code comments in the code repository never name the dispatch, plan or planning repository: no `Dispatch:` trailer, no planning links. In a repository its `project.yml` lists as `{repo: ..., public: true}` this is enforced (`scripts/check-attribution --public`), and there the branch is a plain slug rather than the dispatch id.
+
+### Launching from a thread
+
+A thread that cannot reach the workstation that runs dispatches (a cloud conductor, with no tailnet) starts a run through git, and nudges a running one the same way:
+
+```bash
+ordvik planning launch <project>/<id> [--harness <h>] [--by <name>]   # ask for a run of the doc
+ordvik planning message <project>/<id> --text "<one line>" [--by <name>]   # a line for its run
+```
+
+Each commits to the planning repository's `main` and pushes. Whatever drives runs reads the request on its next refresh and puts one ask to the operator ("Launch <id> on <harness>?"); a doc whose `kind` is in `planning.yml`'s `auto_launch` list launches without the ask. It clears the request in the commit that records the run, so a request launches once. A message reaches the run as its next user message when the run's current turn ends, and is marked `delivered_at`; a message to a doc with no run waits for one. `ordvik planning check` refuses a launch request on a doc that is `executor: human`, done or superseded, and an unknown harness. `ordvik planning status --json` shows both fields on each thread.
+
+Use this rather than asking the operator for a remote session on their machine. The driver side runs `ordvik planning launch <id> --clear --in-place` and `ordvik planning message <id> --delivered <m> --in-place`, which edit the working tree only, so it commits them with its own records.
 
 ### Cross-Repo Dispatch
 
