@@ -158,7 +158,7 @@ Enter the full authoring workflow (see **Authoring Workflow** below). The short-
 6. Write the file as `NNNN-<short-title>.md` in the target scope's directory.
 7. Report the created file path, RFC number, and scope name.
 
-With a reservation, the RFC's PR edits only its own file and its own index row. It never touches the `Next number` line or other rows, so RFC PRs don't conflict with each other.
+With a reservation, the RFC's PR edits only its own file. Its index row is generated from the RFC's header: the title, the first word of `**Status**`, and a one-line `**Summary**` for the index's Summary (or Notes) column. Never edit a row by hand; where the repo has `.github/workflows/rfc-index.yml`, a workflow regenerates the indexes on the default branch after each merge (`scripts/rfc index`), so RFC PRs don't conflict with each other. Without that workflow, run `scripts/rfc index --write` and commit the README with the RFC.
 
 ### `reserve [--scope <project>] <short-title>`
 
@@ -171,7 +171,7 @@ Takes the next number in a scope with a PR that the repo's `rfc-reservation` wor
 5. When CI passes on the PR, the workflow checks it with `scripts/rfc verify-reservation`, run from the default branch, and rebase-merges it. If CI passed but the PR is still open, run the workflow by hand with the PR number. If the number was taken on the default branch first, reset and reserve again.
 6. Once it has merged, write the RFC on a new PR. A cloud session restarts its branch from the default branch for this, since the reservation PR is merged.
 
-`scripts/rfc next --scope <dir>` prints the next free number without reserving it. `scripts/rfc check` fails on two files sharing a number, unless the scope README's "Number Collisions" table lists it, and on a `Next number` that's already taken; run it in the repo's test suite.
+`scripts/rfc next --scope <dir>` prints the next free number without reserving it. `scripts/rfc check` fails on two files sharing a number, unless the scope README's "Number Collisions" table lists it, and on a `Next number` that's already taken; run it in the repo's test suite. `scripts/rfc index` lists the READMEs whose index rows are stale against the RFC headers (exit 1), and `--write` regenerates them; the `rfc-index` workflow runs it on the default branch and opens a PR that `rfc-reservation` merges once `scripts/rfc verify-index` confirms it changes only the indexes.
 
 ### `child <parent-number> <short-title>`
 

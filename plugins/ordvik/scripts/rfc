@@ -7,7 +7,8 @@ other one. So an RFC starts with a reservation: a small PR that adds a stub
 file, the index row and the "Next number" bump, and nothing else. A
 workflow merges a valid reservation PR once its checks pass (.github/workflows/
 rfc-reservation.yml), so the number is taken on master before the RFC is
-written. The RFC's own PR then edits only its stub and its own row.
+written. The RFC's own PR then edits only its stub: its index row is
+generated from its header (below).
 
 A scope is a directory named rfcs that holds NNNN-<slug>.md files
 (docs/rfcs/ is the root scope, <project>/docs/rfcs/ a project scope). Its README.md holds the index: the
@@ -15,19 +16,34 @@ first table whose header starts with "| RFC |", an optional
 "Next number: **NNNN**" line, and an optional "Number Collisions" table
 whose first column lists numbers that two files are known to share.
 
+The index rows are generated from the RFCs' own headers (`rfc index`): the
+"# RFC NNNN: Title" heading, the **Status** line (its first word) and the
+**Summary** line, which fills a Summary or Notes column. An RFC's PR edits
+only its own file, never its row, so two RFC PRs never touch neighbouring
+lines; the rfc-index workflow regenerates the indexes on master after each
+merge. A README may also carry another scope's table under a heading that
+names it, "### <name> (`<path>/`)", as docs/rfcs/README.md does for the
+project scopes; `rfc index` regenerates those too.
+
 Usage:
   rfc next [--scope <dir>] [--min <n>]          Print the next free number
   rfc reserve [--scope <dir>] [--min <n>] <slug> <title> [--author <name>] [--date <YYYY-MM-DD>]
                                                 Write the stub, row and Next number bump
   rfc check                                     Check every scope (tier 1)
+  rfc index [--write]                           Regenerate every index table from the
+                                                RFC headers; without --write, print the
+                                                stale READMEs and exit 1 if any
   rfc verify-reservation <base> <head>          Is base...head exactly one valid reservation?
+  rfc verify-index <base> <head>                Is base...head an index regeneration?
 
 reserve works on the working tree; start from a fresh origin/master. It
 prints the stub's path. --min raises the floor, for a scope whose
 numbering skips ahead (ordvik's numbering.next_min). verify-reservation prints "reservation NNNN" and
 exits 0 for a valid reservation, prints "not a reservation: <why>" and exits
 3 for a PR that isn't one, and prints the problem and exits 1 for a PR that
-looks like a reservation but is wrong.
+looks like a reservation but is wrong. verify-index does the same for the
+rfc-index workflow's PR: it changes only scope READMEs, and at its head
+they are what `rfc index` generates.
 
 Exit status: 0, 1 on errors, 2 on bad usage, 3 as above.
 """
@@ -84,7 +100,8 @@ class Tree:
             return None
 
     def scopes(self):
-        args = ["ls-tree", "-r", "--name-only", self.ref] if self.ref else ["ls-files"]
+        args = ["ls-tree", "-r", "--name-only", self.ref] if self.ref else [
+            "ls-files", "--cached", "--others", "--exclude-standard"]
         found = set()
         for p in git(self.root, *args).stdout.splitlines():
             d = os.path.dirname(p)
@@ -134,6 +151,123 @@ class Index:
 
     def text(self):
         return "\n".join(self.lines) + "\n"
+
+
+# Header fields: "**Status**: x", "**Status:** x", or either as a list item.
+FIELD_RE = re.compile(r"^(?:[-*]\s+)?\*\*(Status|Summary)(?:\*\*:|:\*\*)\s*(.*?)\s*$")
+HEADING_RE = re.compile(r"^#\s+(?:RFC(?:\s+\d+)?\s*:\s*)?(.*?)\s*$")
+SECTION_RE = re.compile(r"^###\s+\S+\s+\(`([^`]+?)/?`\)")
+
+
+def rfc_header(text):
+    """(title, status, summary) from an RFC's heading and header fields.
+
+    Reads YAML front matter (status:, summary:), then the "# RFC NNNN:
+    Title" heading and the **Status** and **Summary** lines that follow it,
+    up to the first section; a "## Status" section's first line also
+    counts as the status.
+    """
+    lines = (text or "").splitlines()
+    fields, start = {}, 0
+    if lines and lines[0].strip() == "---":
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                start = j + 1
+                break
+            m = re.match(r"^(status|summary|title):\s*(.*?)\s*$", lines[j], re.I)
+            if m:
+                fields.setdefault(m.group(1).lower(), m.group(2).strip("\"'"))
+    title = None
+    status_section = False
+    for line in lines[start:]:
+        if title is None:
+            m = HEADING_RE.match(line)
+            if m and line.startswith("# "):
+                title = m.group(1)
+            continue
+        if status_section and line.strip():
+            fields.setdefault("status", line.strip())
+            status_section = False
+            continue
+        if line.startswith("## "):
+            if line[3:].strip().lower() == "status" and "status" not in fields:
+                status_section = True
+                continue
+            break
+        m = FIELD_RE.match(line)
+        if m:
+            fields.setdefault(m.group(1).lower(), m.group(2))
+    title = title or fields.get("title", "")
+    m = re.match(r"[A-Za-z-]+", fields.get("status", ""))
+    return title, (m.group(0).lower() if m else ""), fields.get("summary", "")
+
+
+def cell(text):
+    return text.replace("|", "\\|").strip()
+
+
+def generated_rows(tree, scope, header, link_from):
+    """The index rows for scope's RFC files, in a table with this header."""
+    columns = [c.strip().lower() for c in header.strip().strip("|").split("|")]
+    rows = []
+    for name in sorted(tree.names(scope), key=lambda n: (int(n.split("-")[0]), n)
+                       if FILE_RE.match(n) else (0, n)):
+        m = FILE_RE.match(name)
+        if not m:
+            continue
+        title, status, summary = rfc_header(tree.read(f"{scope}/{name}"))
+        link = os.path.relpath(f"{scope}/{name}", link_from)
+        values = {"rfc": m.group(1), "title": f"[{cell(title)}]({link})",
+                  "status": status, "summary": cell(summary), "notes": cell(summary)}
+        cells = [values.get(c, "") for c in columns]
+        rows.append("|" + "|".join(f" {c} " if c else " " for c in cells) + "|")
+    return rows
+
+
+def regenerate(tree, readme_dir, text):
+    """text with every index table it holds regenerated from its scope's files."""
+    lines = text.splitlines()
+    out, scope, own_done, i = [], None, False, 0
+    while i < len(lines):
+        line = lines[i]
+        m = SECTION_RE.match(line)
+        if m:
+            scope = m.group(1)
+        if re.match(r"^\|\s*RFC\s*\|", line) and i + 1 < len(lines) and lines[i + 1].startswith("|-"):
+            target = scope if scope is not None else (None if own_done else readme_dir)
+            if target is not None:
+                own_done = own_done or scope is None
+                out += [line, lines[i + 1]]
+                out += generated_rows(tree, target, line, readme_dir)
+                i += 2
+                while i < len(lines) and lines[i].startswith("|"):
+                    i += 1
+                continue
+        out.append(line)
+        i += 1
+    return "\n".join(out) + "\n"
+
+
+def index_readmes(tree):
+    """(path, current text, generated text) for every scope README with an index."""
+    out = []
+    for scope in sorted(set(tree.scopes()) | {ROOT_SCOPE}):
+        path = f"{scope}/README.md"
+        text = tree.read(path)
+        if text is None or not re.search(r"^\|\s*RFC\s*\|", text, re.M):
+            continue
+        out.append((path, text, regenerate(tree, scope, text)))
+    return out
+
+
+def cmd_index(root, write):
+    stale = [(p, new) for p, old, new in index_readmes(Tree(root)) if old != new]
+    for path, new in stale:
+        if write:
+            with open(os.path.join(root, path), "w", encoding="utf-8") as f:
+                f.write(new)
+        print(path)
+    return 0 if write or not stale else 1
 
 
 def numbered_files(tree, scope):
@@ -283,8 +417,23 @@ def verify_reservation(root, base, head):
     return 0, f"reservation {fmt(n)}"
 
 
-def cmd_verify(root, base, head):
-    code, msg = verify_reservation(root, base, head)
+def verify_index(root, base, head):
+    """(exit code, message) for an index regeneration PR base...head."""
+    changes = changed_files(root, base, head)
+    readmes = {path for path, _, _ in index_readmes(Tree(root, head))}
+    others = sorted(p for _, p in changes if p not in readmes)
+    if not changes:
+        return 3, "not an index regeneration: it changes nothing"
+    if others:
+        return 3, f"not an index regeneration: it changes {', '.join(others[:3])}"
+    stale = [p for p, old, new in index_readmes(Tree(root, head)) if old != new]
+    if stale:
+        return 1, f"{', '.join(stale)}: not what scripts/rfc index generates"
+    return 0, "index regeneration"
+
+
+def cmd_verify(root, base, head, verify=None):
+    code, msg = (verify or verify_reservation)(root, base, head)
     print(msg, file=sys.stdout if code in (0, 3) else sys.stderr)
     return code
 
@@ -319,8 +468,12 @@ def main(argv):
         return cmd_reserve(root, scope, pos[0], pos[1], author, date, minimum)
     if cmd == "check" and not pos:
         return cmd_check(root)
+    if cmd == "index" and pos in ([], ["--write"]):
+        return cmd_index(root, pos == ["--write"])
     if cmd == "verify-reservation" and len(pos) == 2:
         return cmd_verify(root, pos[0], pos[1])
+    if cmd == "verify-index" and len(pos) == 2:
+        return cmd_verify(root, pos[0], pos[1], verify_index)
     print(__doc__, file=sys.stderr)
     return 2
 

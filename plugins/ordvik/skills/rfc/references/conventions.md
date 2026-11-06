@@ -110,6 +110,7 @@ This fallback means ordvik works in repos that haven't created `.ordvik.yml` yet
 - Filename format: `NNNN-short-title.md`
 - Take numbers with a reservation PR (`scripts/rfc reserve`, the skill's `reserve`), which the `rfc-reservation` workflow merges once CI passes on it. Scanning for "highest + 1" is the fallback for repos without `scripts/rfc`: parallel authors collide that way, and RFC PRs that each append an index row conflict with each other.
 - `scripts/rfc next` prints one past the highest file, index row, or `Next number` line in the scope; `--min` applies `next_min`.
+- Index rows are generated from the RFC headers (`scripts/rfc index`): the `# RFC NNNN: Title` heading, the first word of `**Status**`, and the one-line `**Summary**`. An RFC's PR edits only its own file; the `rfc-index` workflow regenerates the indexes after it merges.
 - Duplicate numbers that predate reservations go in the scope README's "Number Collisions" table; `scripts/rfc check` fails on any other.
 - Each scope has independent numbering
 

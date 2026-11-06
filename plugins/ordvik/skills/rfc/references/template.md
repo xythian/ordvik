@@ -3,6 +3,7 @@
 **Status**: draft
 **Author**: {{AUTHOR}}
 **Date**: {{DATE}}
+**Summary**: One line for the RFC index
 
 ## Problem
 
