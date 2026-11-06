@@ -55,6 +55,16 @@ ordvik planning ask answer <id> <n|other>          # record the operator's answe
 the same output as `scripts/plan` and `scripts/asks`, whose own tests
 (`tests/contract/`) run against the Go command in `go test`.
 
+Repositories copy `scripts/plan`, `scripts/rfc`, `scripts/asks` and
+`scripts/ordvik` from the plugin unchanged, so a fix is made once, here.
+`ordvik scripts check` says which copies in a repository differ from the
+plugin's (exit 1 if any do; `--diff` shows how), and `ordvik scripts update`
+replaces them. `/ordvik:init` runs the check, and a repository's tests can:
+
+```bash
+go run github.com/xythian/ordvik/cmd/ordvik@main scripts check
+```
+
 ## Skills
 
 | Skill | Description | Layer |
