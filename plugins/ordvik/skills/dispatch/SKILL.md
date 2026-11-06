@@ -399,6 +399,8 @@ Shared testing strategy across all tasks (unit, integration, regression).
 
    A list of commands for the operator to type is not a gate; it is a missing command.
 
+   In a project where each PR declares its rollout steps in a pending rollout file and a release train ships them, a production step is not an approval: the thread does not ask for a rollout at all. The task names the pending rollout file and the step, and says the step ships in the next train. Only a step the train cannot run stays a human gate.
+
 8. **Write the document** — Create the file at `<planning>/dispatch/YYYYMMDD-<slug>.md` (today's date) following the format above. In multi-scope repos, include the `scope` field in frontmatter. Always include the Pre-PR Checklist and Pre-existing issues sections.
 
 9. **Report** — Show the user: file path, thread id, plan (if any), scope (if multi-scope), task count, and any human gates.
