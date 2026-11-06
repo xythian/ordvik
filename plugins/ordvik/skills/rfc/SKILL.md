@@ -152,13 +152,13 @@ Enter the full authoring workflow (see **Authoring Workflow** below). The short-
    - If `--scope` is given, look it up in the scope registry. Error if unknown.
    - In single-scope repos, use root scope.
    - In multi-scope repos without `--scope`, infer from context or ask the user.
-3. **Reserve the number.** If the repo has `scripts/rfc`, run `reserve` (below) and wait until its PR has merged, then start the RFC's own branch from the default branch; the stub and index row are already there. Without `scripts/rfc`, fall back to scanning: take one past the highest number in the scope's directory (accounting for legacy digits, retired numbers and `next_min` in `.ordvik.yml`), and re-scan just before writing in case a concurrent author took it.
+3. **Reserve the number.** If the repo has `scripts/rfc`, run `reserve` (below) and wait until its PR has merged, then start the RFC's own branch from the default branch; the stub is already there. Without `scripts/rfc`, fall back to scanning: take one past the highest number in the scope's directory (accounting for legacy digits, retired numbers and `next_min` in `.ordvik.yml`), and re-scan just before writing in case a concurrent author took it.
 4. Get the author name: run `git config user.name` via Bash.
 5. Read the template file (project-local `docs/rfcs/template.md` first, then `${CLAUDE_SKILL_DIR}/references/template.md`) and fill in: number, title (convert short-title from kebab-case to Title Case), author, today's date. With a reservation, replace the stub's body and keep its heading.
 6. Write the file as `NNNN-<short-title>.md` in the target scope's directory.
 7. Report the created file path, RFC number, and scope name.
 
-With a reservation, the RFC's PR edits only its own file. Its index row is generated from the RFC's header: the title, the first word of `**Status**`, and a one-line `**Summary**` for the index's Summary (or Notes) column. Never edit a row by hand; where the repo has `.github/workflows/rfc-index.yml`, a workflow regenerates the indexes on the default branch after each merge (`scripts/rfc index`), so RFC PRs don't conflict with each other. Without that workflow, run `scripts/rfc index --write` and commit the README with the RFC.
+With a reservation, the RFC's PR edits only its own file, so RFC PRs don't conflict with each other. No README holds an index table: the RFC's header is its index entry (the title, the first word of `**Status**`, and a one-line `**Summary**`), and `scripts/rfc index` prints a scope's index from the headers. Never add an index table or row to a README.
 
 ### `reserve [--scope <project>] <short-title>`
 
@@ -171,7 +171,7 @@ Takes the next number in a scope with a PR that the repo's `rfc-reservation` wor
 5. When CI passes on the PR, the workflow checks it with `scripts/rfc verify-reservation`, run from the default branch, and rebase-merges it. If CI passed but the PR is still open, run the workflow by hand with the PR number. If the number was taken on the default branch first, reset and reserve again.
 6. Once it has merged, write the RFC on a new PR. A cloud session restarts its branch from the default branch for this, since the reservation PR is merged.
 
-`scripts/rfc next --scope <dir>` prints the next free number without reserving it. `scripts/rfc check` fails on two files sharing a number, unless the scope README's "Number Collisions" table lists it, and on a `Next number` that's already taken; run it in the repo's test suite. `scripts/rfc index` lists the READMEs whose index rows are stale against the RFC headers (exit 1), and `--write` regenerates them; the `rfc-index` workflow runs it on the default branch and opens a PR that `rfc-reservation` merges once `scripts/rfc verify-index` confirms it changes only the indexes.
+`scripts/rfc next --scope <dir>` prints the next free number without reserving it. `scripts/rfc check` fails on two files sharing a number, unless the scope README's "Number Collisions" table lists it, and on a `Next number` that's already taken; run it in the repo's test suite. `scripts/rfc index [--scope <dir>]` prints the index of one scope, or of every scope, as Markdown tables generated from the RFC headers.
 
 ### `child <parent-number> <short-title>`
 

@@ -30,11 +30,6 @@ ENV_BASE = {
 README = textwrap.dedent("""\
     # RFCs
 
-    | RFC | Title | Status | Notes |
-    |-----|-------|--------|-------|
-    | 0001 | [One](0001-one.md) | accepted | |
-    | 0002 | [Two](0002-two.md) | draft | |
-
     Next number: **0003**
 
     ### Number Collisions
@@ -102,8 +97,11 @@ class RfcTest(unittest.TestCase):
         self.repo.write("docs/rfcs/0007-seven.md", "# RFC 0007: Seven\n")
         self.assertEqual(self.repo.rfc("next")[1], "0008")
         self.assertEqual(self.repo.rfc("next", "--min", "41")[1], "0041")
+        # A table left in a README from before still counts as taken.
+        self.repo.write("docs/rfcs/README.md", README + "\n| RFC | Title |\n|-----|-------|\n| 0009 | Nine |\n")
+        self.assertEqual(self.repo.rfc("next")[1], "0010")
 
-    def test_reserve_writes_stub_row_and_next_number(self):
+    def test_reserve_writes_the_stub_and_next_number(self):
         code, out, err = self.repo.rfc("reserve", "three", "Three Things", "--author", "fox",
                                        "--date", "2026-10-23")
         self.assertEqual(code, 0, err)
@@ -111,10 +109,7 @@ class RfcTest(unittest.TestCase):
         stub = self.repo.read(out)
         self.assertTrue(stub.startswith("# RFC 0003: Three Things\n"))
         self.assertIn("**Status**: draft", stub)
-        readme = self.repo.read("docs/rfcs/README.md").splitlines()
-        row = "| 0003 | [Three Things](0003-three.md) | draft | |"
-        self.assertEqual(readme[readme.index(row) - 1], "| 0002 | [Two](0002-two.md) | draft | |")
-        self.assertIn("Next number: **0004**", readme)
+        self.assertEqual(self.repo.read("docs/rfcs/README.md"), README.replace("0003", "0004"))
         self.assertEqual(self.repo.rfc("check")[0], 0)
 
     def test_reserve_rejects_a_bad_slug(self):
@@ -172,81 +167,40 @@ class RfcTest(unittest.TestCase):
     def test_verify_rejects_extra_readme_edits(self):
         self.repo.git("checkout", "-q", "-b", "rfc/three", "master")
         self.repo.rfc("reserve", "three", "Three")
-        readme = self.repo.read("docs/rfcs/README.md").replace("| draft | |", "| accepted | |")
-        self.repo.write("docs/rfcs/README.md", readme)
-        self.repo.commit("reserve and flip a status")
+        self.repo.write("docs/rfcs/README.md", self.repo.read("docs/rfcs/README.md") + "| 0003 | Three |\n")
+        self.repo.commit("reserve and add a row")
         code, _, err = self.repo.rfc("verify-reservation", "master", "rfc/three")
         self.assertEqual(code, 1)
-        self.assertIn("may change only the new row", err)
+        self.assertIn("may change only the Next number line", err)
 
-    def test_index_is_current_after_a_reservation(self):
-        self.assertEqual(self.repo.rfc("index"), (0, "", ""))
-        self.repo.rfc("reserve", "three", "Three", "--author", "fox", "--date", "2026-10-23")
-        self.assertEqual(self.repo.rfc("index"), (0, "", ""))
-
-    def test_index_regenerates_rows_from_the_headers(self):
+    def test_index_prints_rows_from_the_headers(self):
         self.repo.write("docs/rfcs/0002-two.md",
-                        "# RFC 0002: Two, Renamed\n\n**Status**: accepted; phase 1 built\n"
+                        "# RFC 0002: Two, Renamed\n\n**Status**: Accepted; phase 1 built\n"
                         "**Author**: fox\n**Summary**: Does a | b\n\n## Problem\n\n**Summary**: no\n")
         self.repo.write("docs/rfcs/0003-three.md", "# RFC 0003: Three\n\n**Status:** Paused (2026-10-23)\n")
-        code, out, _ = self.repo.rfc("index")
-        self.assertEqual((code, out), (1, "docs/rfcs/README.md"))
-        self.assertEqual(self.repo.rfc("index", "--write")[:2], (0, "docs/rfcs/README.md"))
-        readme = self.repo.read("docs/rfcs/README.md")
-        self.assertIn("| 0001 | [One](0001-one.md) | accepted | |\n"
-                      "| 0002 | [Two, Renamed](0002-two.md) | accepted | Does a \\| b |\n"
-                      "| 0003 | [Three](0003-three.md) | paused | |\n\n"
-                      "Next number: **0003**\n", readme)
-        self.assertEqual(self.repo.rfc("index"), (0, "", ""))
+        code, out, err = self.repo.rfc("index", "--scope", "docs/rfcs")
+        self.assertEqual((code, out), (0, textwrap.dedent("""\
+            | RFC | Title | Status | Summary |
+            |-----|-------|--------|---------|
+            | 0001 | [One](docs/rfcs/0001-one.md) | accepted | |
+            | 0002 | [Two, Renamed](docs/rfcs/0002-two.md) | accepted | Does a \\| b |
+            | 0003 | [Three](docs/rfcs/0003-three.md) | paused | |""")), err)
 
-    def test_index_regenerates_another_scopes_table_under_its_heading(self):
+    def test_index_reads_every_header_style_and_scope(self):
         self.repo.write("plane/docs/rfcs/0001-wings.md",
-                        "---\nstatus: implemented\nauthor: agent\n---\n\n# RFC 0001: Wings\n")
-        self.repo.write("plane/docs/rfcs/002-tail.md",
-                        "# RFC: Tail\n\n- **Status**: draft\n")
+                        "---\nstatus: implemented\nsummary: Flaps\n---\n\n# RFC 0001: Wings\n")
+        self.repo.write("plane/docs/rfcs/002-tail.md", "# RFC: Tail\n\n- **Status**: draft\n")
         self.repo.write("plane/docs/rfcs/0003-nose.md",
                         "# RFC 0003: Nose\n\n## Status\n\nRejected (2026-10-01)\n\n## Summary\n")
-        self.repo.write("plane/docs/rfcs/README.md", "# Plane\n\n| RFC | Title | Status |\n|-----|-------|--------|\n")
-        self.repo.write("docs/rfcs/README.md", README + textwrap.dedent("""\
-            ## Project Scopes
-
-            ### plane (`plane/docs/rfcs/`)
-
-            | RFC | Title | Status |
-            |-----|-------|--------|
-            | 0001 | [Old](../../plane/docs/rfcs/0001-wings.md) | draft |
-            """))
-        self.repo.rfc("index", "--write")
-        rows = ("| 0001 | [Wings]({p}0001-wings.md) | implemented |\n"
-                "| 002 | [Tail]({p}002-tail.md) | draft |\n"
-                "| 0003 | [Nose]({p}0003-nose.md) | rejected |\n")
-        self.assertTrue(self.repo.read("docs/rfcs/README.md").endswith(
-            rows.format(p="../../plane/docs/rfcs/")))
-        self.assertTrue(self.repo.read("plane/docs/rfcs/README.md").endswith(rows.format(p="")))
-        # The root scope's own table is still the first one.
-        self.assertIn("| 0002 | [Two](0002-two.md) | draft | |", self.repo.read("docs/rfcs/README.md"))
-
-    def test_verify_index_accepts_a_regeneration_and_skips_other_prs(self):
-        self.repo.write("docs/rfcs/0002-two.md", "# RFC 0002: Two\n\n**Status**: accepted\n")
-        self.repo.commit("accept two")
-        self.repo.git("checkout", "-q", "-b", "rfc-index/regenerate", "master")
-        self.repo.rfc("index", "--write")
-        self.repo.commit("regenerate")
-        code, out, err = self.repo.rfc("verify-index", "master", "rfc-index/regenerate")
-        self.assertEqual((code, out), (0, "index regeneration"), err)
-        self.assertEqual(self.repo.rfc("verify-index", "master", "master")[0], 3)
-
-        self.repo.write("docs/rfcs/README.md",
-                        self.repo.read("docs/rfcs/README.md").replace("| accepted | |", "| rejected | |", 1))
-        self.repo.commit("hand edit")
-        code, _, err = self.repo.rfc("verify-index", "master", "rfc-index/regenerate")
-        self.assertEqual(code, 1)
-        self.assertIn("not what scripts/rfc index generates", err)
-
-        self.repo.write("src/main.go", "package main // sneaky\n")
-        self.repo.commit("code")
-        self.assertEqual(self.repo.rfc("verify-index", "master", "rfc-index/regenerate")[0], 3)
-
+        code, out, err = self.repo.rfc("index")
+        self.assertEqual(code, 0, err)
+        self.assertIn("## docs/rfcs\n\n| RFC |", out)
+        self.assertTrue(out.endswith(
+            "## plane/docs/rfcs\n\n| RFC | Title | Status | Summary |\n|-----|-------|--------|---------|\n"
+            "| 0001 | [Wings](plane/docs/rfcs/0001-wings.md) | implemented | Flaps |\n"
+            "| 002 | [Tail](plane/docs/rfcs/002-tail.md) | draft | |\n"
+            "| 0003 | [Nose](plane/docs/rfcs/0003-nose.md) | rejected | |"), out)
+        self.assertEqual(self.repo.rfc("index", "--scope", "none/docs/rfcs")[0], 1)
 
 if __name__ == "__main__":
     unittest.main()

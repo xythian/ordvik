@@ -87,8 +87,8 @@ changed nothing stays in the thread.
 
 **Reserve, then write.** Where the repo has `scripts/rfc`, reserve the
 number first with a reservation PR that merges itself, then write the RFC on
-its own PR (`/ordvik:rfc reserve`). The RFC's PR touches only its file and
-its own index row.
+its own PR (`/ordvik:rfc reserve`). The RFC's PR touches only its file;
+its header is its index entry.
 
 **Merging the RFC's PR accepts it.** An RFC is written to be accepted, so
 its PR lands it as `accepted` and the merge is the operator's acceptance.
