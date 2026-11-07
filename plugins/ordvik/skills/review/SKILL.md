@@ -121,6 +121,21 @@ could verify the change, file a backlog item in the owning project for what
 would have: a test, a suite case, a fixture or test infrastructure.
 `source: review of <owner/name#n>`, P2 unless the charter says otherwise.
 
+**Tell the thread.** A review comment alone may not wake the session that
+opened the PR, so after every **comment** or **hold**, message that session
+in the same run, through whatever the harness offers between sessions:
+
+1. The session the PR body links (a thread link in its attribution header),
+   with the PR, the decision, and that the findings are on the PR to fix or
+   answer.
+2. Otherwise, or when that session has ended or takes no messages, whoever
+   starts sessions (the coordinator), asking it to wake the owning session
+   or start one.
+
+When the next run finds the findings still open with nothing pushed or
+answered since that message, message the coordinator once more. List each
+message under **Pinged** in the report.
+
 **Ended threads.** A finding nobody has pushed or answered two days after
 your comment means the PR's thread has ended. Do not fix it yourself: list
 the PR under **Needs a thread** in the report, so the digest asks for a
@@ -162,8 +177,8 @@ it back.
 Append the run's lines to `<planning>/status/<date>-reviewer.md` of each
 project it touched (date in the planning repository's time zone, the
 operator's), under a `## HH:MM` heading, in the charter's **Reports**
-sections: Merged, Escalated, Held, Sent back, Needs a thread, Missing tests,
-Reverted. Commit the report, any backlog items and asks together, with a
+sections: Merged, Escalated, Held, Sent back, Pinged, Needs a thread,
+Missing tests, Reverted. Commit the report, any backlog items and asks together, with a
 message starting `reviewer:`, check (`ordvik planning check`), and push to
 the planning repository's `main`, rebasing if `main` moved.
 
