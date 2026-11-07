@@ -1,14 +1,15 @@
 ---
 name: garden
-description: Gardening — discovery-oriented codebase surveys. Lists gardening templates, helps customize and launch surveys, and reviews past findings for trends.
+description: The gardener role and gardening surveys. A gardener run keeps the planning repository true (closes what merged PRs settled, tidies, checks invariants, flags staleness) under the gardener's charter; surveys list, launch and review discovery-oriented codebase surveys. Use for a scheduled gardener run, closing finished backlog items, or a codebase survey.
 allowed_tools:
   - Read
   - Write
   - Edit
   - Glob
   - Grep
-  - Bash(git log *)
-  - Bash(git diff *)
+  - Bash(git *)
+  - Bash(ordvik *)
+  - Bash(date *)
   - Bash(./scripts/*)
   - Task
   - AskUserQuestion
@@ -18,7 +19,16 @@ allowed_tools:
 
 **Where planning lives.** `<planning>` below is the project's planning directory: `projects/<project>/` in the planning repository when `.ordvik.yml` names one (`planning: {repo: <owner>/<planning-repo>, project: <project>}`; cloned beside the code checkout as `planning/`, or at `$ORDVIK_PLANNING`), else `docs/planning/` in the repository. In the planning repository the backlog is one file per item in `backlog/` (ordered by `priority`, then `rank`) and threads are files in `threads/`, where `docs/planning/` has `backlog.md` and `threads.md`; status reports are in `status/` (else `docs/status/`); dispatch docs carry `id:`, `thread:` and `repo:` (else the id is `thread:`); plans list `dispatches:` (else `threads:`); and a change is a commit straight to its `main` (fetch, change, `scripts/plan check`, commit, push), not a PR. `scripts/plan` and `scripts/asks` read either layout (in the planning repository they run `ordvik planning`).
 
-Gardening is recurring, discovery-oriented work — agents dispatched to survey the codebase and identify work that needs doing. The primary output is information (findings reports and backlog items), not code changes.
+Gardening has two halves:
+
+- **The gardener role** (`run`) keeps the planning repository true on a
+  schedule: it closes what merged PRs settled, tidies, checks the
+  repository's invariants and flags what is stale. Its charter is the
+  specification.
+- **Surveys** (`survey`, `review`) are recurring, discovery-oriented work:
+  agents dispatched to survey the codebase and identify work that needs
+  doing. Their output is information (findings reports and backlog items),
+  not code changes.
 
 ## Parsing Invocation
 
@@ -26,9 +36,88 @@ The user invokes as `/ordvik:garden [operation]`.
 
 | Operation | Description |
 |-----------|-------------|
+| `run` | A gardener run under its charter (below) |
 | (none) | List available gardening templates |
 | `survey <template>` | Generate a gardening dispatch doc from a template |
 | `review` | Review past gardening reports for trends |
+
+## Gardener Run
+
+`/ordvik:garden run`
+
+**The charter is the specification.** Read `roles/gardener.md` in the
+planning repository (else `<planning>/roles/gardener.md`) and each project's
+override in `projects/<project>/roles/gardener.md` first; where this skill
+and the charter differ, the charter wins.
+
+A run starts fresh. Its state is the planning repository: the charter's run
+state file (`roles/state/gardener.yml`: `last_run` and `main` of the last run
+that committed) and the git history since. A run that finds nothing to do
+ends without a commit.
+
+### 1. Set up
+
+1. Fetch the planning repository and confirm the git identity is the
+   operator's. Never commit as an agent.
+2. Read the run state. The run's window is from `last_run` to now.
+3. `ordvik planning projects` for the projects and the repositories each
+   owns.
+
+### 2. Close what is done
+
+For each PR merged in the window, in every repository you can reach:
+
+1. Find what it settles:
+   - dispatch docs and tasks linked to it (`ordvik planning link` records
+     the PR on the doc; `ordvik planning status` derives done from the
+     merge);
+   - backlog items that link the PR, or whose title, notes or paths the PR
+     addresses;
+   - asks that name the PR.
+2. **Evidence is the merged PR** (it links the item, or plainly implements
+   it): close the item. A backlog item gets `status: done`,
+   `completed: <date>`, and a `**Done (<date>)**: <PR link>. <one line>` note.
+   A dispatch task gets ` — DONE`. An ask gets its answer recorded
+   (`ordvik planning ask answer`) only when the operator's own answer is
+   on the PR.
+3. **Evidence is a judgment** (it partly addresses the item, or "this
+   already works"): leave it open and list it under **Left for you to
+   confirm**, with the evidence.
+
+### 3. Tidy
+
+Follow each project's `conventions.md` close-out tidying: archive done and
+superseded dispatch docs with `git mv`, fix every link that pointed at them
+(`git grep -n '<id>.md'`), close the thread files of threads that ended with a
+one-line outcome, and archive answered asks.
+
+### 4. Check the invariants
+
+For every commit on the planning repository's `main` in the window:
+
+- the author is the operator, and the message carries no agent trailers
+  (`scripts/check-attribution` where the repository has it);
+- `ordvik planning check` passes at the tip.
+
+Fix what a new commit can fix (a failing check, a broken link, a misfiled
+file). Never rewrite or force-push `main`: an attribution slip is reported
+with the commit and what made it, so its cause gets fixed.
+
+### 5. Staleness (weekly)
+
+On the first run of the week, list backlog items untouched for 90 days
+(`git log -1 --format=%cs -- <file>`) and asks open for 14 days, for the
+planner's next pass.
+
+### 6. Report and commit
+
+Append the run's lines to `<planning>/status/<date>-gardener.md` of each
+project it touched (date in the operator's time zone), under a `## HH:MM`
+heading, in the charter's **Reports** sections: Closed, Left for you to
+confirm, Tidied, Invariants, Stale. Update the run state, run
+`ordvik planning check`, and commit everything as one commit whose message
+starts `gardener:` (for example `gardener: close 3 backlog items settled by
+merged PRs`). Push to `main`, rebasing if it moved.
 
 ## Available Templates
 
@@ -150,5 +239,5 @@ Survey methodology:
 ## Gardening Conventions
 
 - **Survey and report, don't fix.** Fixes go through the normal dispatch pipeline. Exception: trivial fixes (typos, unused imports) can be included in the gardening PR, clearly separated from findings.
-- **Frequency is operator-driven.** Gardening runs are dispatched when there's capacity or suspected drift, not on a schedule. The planning skill can suggest gardening runs during gaps between waves.
+- **Surveys are operator-driven; gardener runs are scheduled.** Surveys are dispatched when there's capacity or suspected drift, or when the planner asks. Gardener runs follow the charter's schedule.
 - **Findings accumulate.** The `<planning>/gardening/` directory is an input for planning sessions. Past surveys inform future priorities.

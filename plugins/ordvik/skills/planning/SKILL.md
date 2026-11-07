@@ -38,6 +38,7 @@ The user invokes this skill as `/ordvik:planning [focus]`.
 | `plan-close <slug>` | Close out a finished dispatch plan — update backlog, threads, write retro |
 | `replan` | Replanning session — assess what changed and adjust |
 | `dispatch-ready` | Review backlog for items ready to dispatch |
+| `digest` | Write the daily digest from every role's report and the asks queue |
 
 ## Full Planning Session
 
@@ -231,3 +232,50 @@ Retro format:
 2. For each: can it be decomposed into tasks now?
 3. If yes: offer to run `/ordvik:dispatch create` for it
 4. If no: note what's blocking task-readiness
+
+## Daily Digest
+
+`/ordvik:planning digest [<date>]`
+
+One message a day for the operator, so the standing roles report in one place
+rather than each on its own. The date defaults to today in the operator's
+time zone; the digest covers the day before it, from the end of the previous
+digest.
+
+1. Fetch the planning repository. For each project, read the role reports
+   since the last digest, `<planning>/status/<date>-<role>.md` (one per role
+   per day), and the open asks (`ordvik planning asks --json --project <p>`).
+2. Write `<planning>/status/<date>-digest.md` per project that has anything,
+   in this order, leaving out empty sections:
+
+   ```markdown
+   # Digest: <date>
+
+   ## Needs you
+   <asks by kind (decide, review, approve, do), oldest first, each with its recommendation and link>
+
+   ## Merged by agents
+   <each PR: level, who merged it and why; path-rule highs called out>
+
+   ## Closed by the gardener
+   ## Left for you to confirm
+   ## Needs a thread
+   <PRs whose thread ended with findings open, and missing-test items filed>
+
+   ## Shipped
+   ## Moving and stalled
+   <one line per stream, from the latest planning pass and the day's merges>
+
+   ## Invariants
+   <anything a role found broken, and whether it was fixed>
+   ```
+
+3. `ordvik planning check`, commit (`digest: <project> <date>`) and push.
+4. Post the operator a short version: the **Needs you** count and the top
+   three, what agents merged (a count and anything reverted or path-rule),
+   and anything broken. Link the digest file. A day where nothing needs the
+   operator and nothing merged gets one line.
+5. Ask whoever starts threads (the coordinator) to start one for each PR
+   under **Needs a thread**.
+
+A role with nothing to report adds nothing.
