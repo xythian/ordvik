@@ -75,9 +75,10 @@ go run github.com/xythian/ordvik/cmd/ordvik@main scripts check
 | `/ordvik:dispatch` | Dispatch document creation, listing, and review | Planning |
 | `/ordvik:status` | Session status reports | Core |
 | `/ordvik:report` | Research/topical reports | Core |
-| `/ordvik:planning` | Planning sessions — review threads, triage backlog, close plans | Planning |
+| `/ordvik:planning` | Planning sessions — review threads, triage backlog, close plans, the daily digest | Planning |
 | `/ordvik:verify` | Review completed work for a thread or a plan | Planning |
-| `/ordvik:garden` | Gardening dispatch templates for codebase surveys | Planning |
+| `/ordvik:review` | The reviewer role: review open PRs and merge, comment, hold or escalate each under its charter | Planning |
+| `/ordvik:garden` | The gardener role (close what merged PRs settled, tidy, check invariants) and codebase survey templates | Planning |
 | `/ordvik:ask` | Ask the operator for a decision in one call: options, a recommendation, the answer read back from git | Planning |
 | `/ordvik:asks` | Everything waiting on the operator: decide, review, do; recurring steps to automate | Planning |
 | `/ordvik:research` | Conduct and record structured research — standalone docs or RFC appendices | Core |

@@ -149,11 +149,13 @@ The repo's `AGENTS.md` names its actual hosts for each row.
   Before review, the thread tidies its commits into logical, buildable
   steps and force-pushes its own branch, without asking. It never rewrites
   anyone else's branch.
-- **Who merges.** The operator reviews and merges code. PRs that change
-  only docs or planning files (dispatch docs, plans, backlog, status, RFC
-  reservations) merge themselves once CI is green, where the repo has a
-  workflow for it; until then the operator merges them too. Merging some code on an
-  automated risk assessment is future work and needs its own RFC.
+- **Who merges.** Where the planning repository has a reviewer charter
+  (`roles/reviewer.md`), the reviewer role (`/ordvik:review`) reviews every
+  PR and merges what the charter lets it, and escalates the rest to the
+  operator; a thread does not merge its own PR. Otherwise the operator
+  reviews and merges code. PRs that change only docs or planning files
+  (dispatch docs, plans, backlog, status, RFC reservations) merge themselves
+  once CI is green, where the repo has a workflow for it.
 - **Link the PR, don't name the plan.** With a planning repository, the
   thread links each PR it opens to its dispatch doc
   (`ordvik planning link <project>/<id> --pr <owner/name#n> --task <n>` or
