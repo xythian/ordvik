@@ -275,7 +275,8 @@ func TestLegacyThreadFieldInPlanningRepo(t *testing.T) {
 }
 
 // TestContract runs scripts/plan's and scripts/asks' own tests against
-// `ordvik plan` and `ordvik asks`, and the tests of `ordvik planning ask`.
+// `ordvik plan` and `ordvik asks`, the tests of `ordvik planning ask`, and
+// the plugin's scripts/rfc tests.
 func TestContract(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 is not installed")
@@ -287,7 +288,7 @@ func TestContract(t *testing.T) {
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	for _, f := range []string{"test_plan.py", "test_asks.py", "test_ask.py"} {
+	for _, f := range []string{"test_plan.py", "test_asks.py", "test_ask.py", "test_rfc.py"} {
 		cmd := exec.Command("python3", f)
 		cmd.Dir = "../../tests/contract"
 		cmd.Env = append(os.Environ(), "PLAN_CMD="+bin+" plan", "ASKS_CMD="+bin+" asks", "ORDVIK_CMD="+bin)

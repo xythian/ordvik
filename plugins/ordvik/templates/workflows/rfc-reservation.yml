@@ -1,7 +1,7 @@
 # Merges an RFC number reservation once tier 1 passes on it, so the number
 # is taken on master before the RFC is written (scripts/rfc, the rfc
-# skill's `reserve`). A reservation adds one stub RFC file, its index row
-# and the Next number bump, and nothing else; every other pull request is
+# skill's `reserve`). A reservation adds one stub RFC file and the Next
+# number bump, and nothing else; every other pull request is
 # skipped.
 #
 # It runs when each workflow behind a required check finishes (list them

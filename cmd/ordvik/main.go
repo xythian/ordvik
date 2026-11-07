@@ -76,6 +76,9 @@ and ask files from the working tree.
 
 ordvik plan ... and ordvik asks ... are scripts/plan and scripts/asks.
 
+ordvik scripts check|update compares a repository's copies of the plugin's
+scripts with ordvik's (ordvik scripts help).
+
 An ask id is what asks --json prints: ask:<project>/<slug> (or <project>/<slug>,
 or the bare slug), dispatch:<project>/<id>:<task> (or <project>/<id>:<task>),
 plan:<project>/<plan>:<gate>.
@@ -258,6 +261,8 @@ func run(argv []string, stdout, stderr io.Writer) int {
 		return planningCmd(argv[1:], stdout, stderr, false)
 	case "asks":
 		return planningCmd(append([]string{"asks"}, argv[1:]...), stdout, stderr, false)
+	case "scripts":
+		return scriptsCmd(argv[1:], stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "ordvik: unknown command %q\n\n%s", argv[0], usage)
 	return 2

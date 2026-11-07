@@ -9,6 +9,9 @@ allowed_tools:
   - Grep
   - Bash(git config *)
   - Bash(git remote *)
+  - Bash(ordvik scripts *)
+  - Bash(go run github.com/xythian/ordvik/cmd/ordvik@main scripts *)
+  - Bash(cmp *)
   - AskUserQuestion
 ---
 
@@ -46,7 +49,16 @@ Check for each of these and report what already exists:
 
 Report a summary: "Found: X, Y, Z. Missing: A, B, C."
 
-If everything exists including `.ordvik.yml`, report "This repo is already initialized for ordvik" and offer to review the configuration.
+**Script drift.** If the repo has any of `scripts/plan`, `scripts/rfc`, `scripts/asks` or `scripts/ordvik`, check them against the plugin's copies, which they should match byte for byte so a fix is made once, in ordvik:
+
+```bash
+ordvik scripts check --plugin "${CLAUDE_PLUGIN_ROOT}"      # with the ordvik CLI on PATH
+go run github.com/xythian/ordvik/cmd/ordvik@main scripts check   # without it
+```
+
+Without either, compare each present script with `cmp scripts/<name> "${CLAUDE_PLUGIN_ROOT}/scripts/<name>"`. Report each copy that differs. If the repo's copy carries a fix the plugin lacks, say that the fix belongs in ordvik (`plugins/ordvik/scripts/<name>`) first. Otherwise offer to replace it with the plugin's (`ordvik scripts update`, or copy the file and make it executable); show the diff (`ordvik scripts check --diff`) and ask before replacing. `scripts/wt` is not checked: repos extend it. Check the scripts even when the repo is otherwise already initialized.
+
+If everything exists including `.ordvik.yml`, report "This repo is already initialized for ordvik", report the script drift check, and offer to review the configuration.
 
 ### Step 2: Determine Repo Model
 
@@ -175,9 +187,11 @@ If yes, copy `${CLAUDE_PLUGIN_ROOT}/scripts/wt` to `scripts/wt` in the repo and 
 
 Skip if `scripts/wt` already exists. Note the `pyyaml` dependency (needed for parsing dispatch doc frontmatter).
 
-In the same step, offer `scripts/plan` (copy `${CLAUDE_PLUGIN_ROOT}/scripts/plan`, make it executable): it reads a dispatch plan in `<planning>/plans/` and says which dispatch docs can launch now. Also offer `scripts/asks` (same way; it imports `scripts/plan`): it lists everything waiting on the operator (see `/ordvik:asks`). With it, create `<planning>/asks/` and `<planning>/asks/archive/` (with a `.gitkeep`). Skip any that already exist.
+Whenever this step installs `scripts/plan`, `scripts/rfc` or `scripts/asks`, suggest adding the drift check to the repo's test suite, so a local edit to a copy fails the tests: `go run github.com/xythian/ordvik/cmd/ordvik@main scripts check` (needs Go and network; it exits 1 when a copy differs from ordvik's).
 
-If the repo has RFCs and is on GitHub, also offer RFC number reservation: copy `${CLAUDE_PLUGIN_ROOT}/scripts/rfc` to `scripts/rfc` (executable) and `${CLAUDE_PLUGIN_ROOT}/templates/workflows/rfc-reservation.yml` to `.github/workflows/rfc-reservation.yml`, and suggest adding `python3 scripts/rfc check` to the test suite. Set the workflow's `workflow_run.workflows` to the names of every workflow behind a required status check (the template says `ci`): it tries the merge as each finishes, and the last one's run succeeds. It merges with a token from a dedicated GitHub App, so a ruleset that restricts updates or requires approval can let only that App through. Walk the user through: create a private GitHub App with Contents and Pull requests read and write and no webhook, install it on this repo only, add it to the default branch ruleset's bypass list ("For pull requests only"), and create an environment `rfc-reservation` limited to the default branch holding variable `RFC_APP_ID` and secret `RFC_APP_PRIVATE_KEY`. Skip each file that already exists.
+In the same step, offer `scripts/plan` (copy `${CLAUDE_PLUGIN_ROOT}/scripts/plan`, make it executable): it reads a dispatch plan in `<planning>/plans/` and says which dispatch docs can launch now. Also offer `scripts/asks` (same way; it imports `scripts/plan`): it lists everything waiting on the operator (see `/ordvik:asks`). With it, create `<planning>/asks/` and `<planning>/asks/archive/` (with a `.gitkeep`). When `.ordvik.yml` names a planning repository, also copy `scripts/ordvik` (executable): `plan` and `asks` run it to read planning there. Skip any that already exist.
+
+If the repo has RFCs and is on GitHub, also offer RFC number reservation: copy `${CLAUDE_PLUGIN_ROOT}/scripts/rfc` to `scripts/rfc` (executable) and `${CLAUDE_PLUGIN_ROOT}/templates/workflows/rfc-reservation.yml` to `.github/workflows/rfc-reservation.yml`, and suggest adding `python3 scripts/rfc check` to the test suite. Scope READMEs hold no index table (an RFC PR editing its row conflicts with the next reservation): offer to replace an existing one with a pointer to `scripts/rfc index`, which prints the index from the RFC headers. Set the workflow's `workflow_run.workflows` to the names of every workflow behind a required status check (the template says `ci`): it tries the merge as each finishes, and the last one's run succeeds. It merges with a token from a dedicated GitHub App, so a ruleset that restricts updates or requires approval can let only that App through. Walk the user through: create a private GitHub App with Contents and Pull requests read and write and no webhook, install it on this repo only, add it to the default branch ruleset's bypass list ("For pull requests only"), and create an environment `rfc-reservation` limited to the default branch holding variable `RFC_APP_ID` and secret `RFC_APP_PRIVATE_KEY`. Skip each file that already exists.
 
 ### Step 9: Report and Suggest Next Steps
 
@@ -199,7 +213,7 @@ Template files are in `${CLAUDE_PLUGIN_ROOT}/templates/`:
 | `threads.md` | `<planning>/threads.md` | Thread registry with status definitions |
 | `backlog.md` | `<planning>/backlog.md` | Prioritized backlog (P0-P2 + Done) |
 | `AGENTS-guidance.md` | Appended to `CLAUDE.md` | Development process summary, codebase exploration and build/test guidance |
-| `workflows/rfc-reservation.yml` | `.github/workflows/rfc-reservation.yml` | Merges RFC number reservation PRs once CI passes on them |
+| `workflows/rfc-reservation.yml` | `.github/workflows/rfc-reservation.yml` | Merges RFC number reservation and index regeneration PRs once CI passes on them |
 
 Scripts in `${CLAUDE_PLUGIN_ROOT}/scripts/`:
 
@@ -207,10 +221,11 @@ Scripts in `${CLAUDE_PLUGIN_ROOT}/scripts/`:
 |--------|-------------|-------------|
 | `wt` | `scripts/wt` | Worktree manager — create, launch, list, clean worktrees |
 | `plan` | `scripts/plan` | Dispatch plan status — what can launch, what needs a doc, which gates to ask |
-| `rfc` | `scripts/rfc` | RFC number reservation, next number, and the index check |
+| `rfc` | `scripts/rfc` | RFC number reservation, next number, the index check, and index generation |
 | `asks` | `scripts/asks` | Operator asks — every decision, review and step waiting on the human |
+| `ordvik` | `scripts/ordvik` | Runs the ordvik CLI in the planning repository, for `plan` and `asks` when planning lives there |
 
-Read each template file and write it to the target path. Do not modify the templates — they're starter content that the user will customize.
+Read each template file and write it to the target path. Do not modify the templates — they're starter content that the user will customize. The scripts are different: `plan`, `rfc`, `asks` and `ordvik` are copied unchanged and stay that way (the drift check in Step 1); only `wt` is the repo's to extend.
 
 ---
 
@@ -227,7 +242,8 @@ The `ordvik.initialized_version` field in `.ordvik.yml` records which version of
 
 **v0.1 upgrade path:**
 1. `claude plugin update ordvik` — updates plugin skills automatically (no repo changes needed)
-2. Plugin-managed repo files (`scripts/wt`, `scripts/plan`, `scripts/rfc`, `scripts/asks`, the reservation workflow, agent guidance) must be updated manually for now
+2. `ordvik scripts check` says which of `scripts/plan`, `scripts/rfc`, `scripts/asks` and `scripts/ordvik` differ from the plugin's, and `ordvik scripts update` replaces them with the plugin's
+3. Other plugin-managed repo files (`scripts/wt`, the reservation and index workflows, agent guidance) must be updated manually for now
 
 **Future `--upgrade` flag** (not yet implemented):
 - Compare `initialized_version` against the current plugin version

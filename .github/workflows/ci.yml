@@ -4,10 +4,10 @@ name: ci
 
 on:
   pull_request:
-    paths: ["**.go", "go.mod", "go.sum", "tests/**", ".github/workflows/ci.yml"]
+    paths: ["**.go", "go.mod", "go.sum", "tests/**", "plugins/ordvik/scripts/**", ".github/workflows/ci.yml"]
   push:
     branches: [main]
-    paths: ["**.go", "go.mod", "go.sum", "tests/**", ".github/workflows/ci.yml"]
+    paths: ["**.go", "go.mod", "go.sum", "tests/**", "plugins/ordvik/scripts/**", ".github/workflows/ci.yml"]
 
 permissions:
   contents: read
