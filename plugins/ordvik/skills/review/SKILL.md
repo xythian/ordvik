@@ -163,10 +163,14 @@ ordvik planning ask new --project <p> --kind review --category review \
   --question "Merge <owner/name#n>: <title>?" \
   --option "Merge=<what merging does>" \
   --option "Send back=<what to change>" \
-  --recommended <n> \
+  --recommended 0 \
   --context "<risk level and why it is yours; what the reviewer checked; what is left for you>" \
   --from-pr <owner/name#n>
 ```
+
+Options are counted from 0 in the order given, so `--recommended 0` is
+Merge and `1` is Send back. A clean pass recommends Merge (`0`); recommend
+Send back (`1`) only when the context says what must change first.
 
 A PR with an open design question gets a `decide` ask instead, with the
 question's options. Once the operator answers, the next run merges or sends
