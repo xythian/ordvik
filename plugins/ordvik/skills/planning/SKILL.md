@@ -83,6 +83,28 @@ report's "Waiting on the Operator" section. While doing so:
 - For each candidate to automate, propose **Automate** (a backlog item for
   the command) or **Keep** (with the reason).
 
+Read ages from full history: in a shallow clone (`git rev-parse
+--is-shallow-repository`) run `git fetch --unshallow origin` first, or every
+gate looks as old as the clone.
+
+### Step 2c: Rebuild the Stall Register
+
+In the planning repository, rebuild `<planning>/stalled.md` (its rules are
+the planning repository's `roles/README.md`, "The stall register") from
+Steps 2 and 2b: every gate or ask open 7 days, merged work waiting on a
+release, dispatches `ready` for 2 days with no launch request, plans and
+dispatches finished but still active, open PRs idle 3 days (holds
+included), and blocked or unanswered review-ready threads. For each, write
+**why** it stopped and **what unblocks it**, naming who, and group rows by
+the blocker they share so one action that clears many shows as one line.
+
+- Triage every gate three weeks old into *ride the next train*, *one
+  approved run*, or *close / re-scope*, and say which.
+- Request a launch (`ordvik planning launch`) for each ready dispatch with
+  nothing in its way, or say in the register why not.
+- Carry the register's blockers, most items cleared first, into the
+  report's "Stalled" section.
+
 ### Step 3: Triage TODO.md
 
 If `TODO.md` exists, triage each item:
@@ -128,6 +150,11 @@ Items that are task-ready or could be made task-ready this session:
 ### Consciously Deferred
 
 - [Thread/item] — [reason, what would reactivate]
+
+### Stalled
+
+[From the stall register: each shared blocker, how many items it holds and
+for how long, and what clears it]
 
 ### Waiting on the Operator
 
@@ -242,9 +269,13 @@ rather than each on its own. The date defaults to today in the operator's
 time zone; the digest covers the day before it, from the end of the previous
 digest.
 
-1. Fetch the planning repository. For each project, read the role reports
-   since the last digest, `<planning>/status/<date>-<role>.md` (one per role
-   per day), and the open asks (`ordvik planning asks --json --project <p>`).
+1. Fetch the planning repository with full history (unshallow it if it is
+   shallow). For each project, read the role reports since the last digest,
+   `<planning>/status/<date>-<role>.md` (one per role per day), the open
+   asks (`ordvik planning asks --json --project <p>`), the stall register
+   (`<planning>/stalled.md`), open PRs and blocked threads.
+   Refresh the register (Step 2c's rules): add what newly qualifies, remove
+   what cleared.
 2. Write `<planning>/status/<date>-digest.md` per project that has anything,
    in this order, leaving out empty sections:
 
@@ -264,13 +295,16 @@ digest.
 
    ## Shipped
    ## Moving and stalled
-   <one line per stream, from the latest planning pass and the day's merges>
+   <one line per stream, from the latest planning pass and the day's merges;
+   then the stall register's blockers, the one that clears most first, with
+   what was added to or cleared from it today>
 
    ## Invariants
    <anything a role found broken, and whether it was fixed>
    ```
 
-3. `ordvik planning check`, commit (`digest: <project> <date>`) and push.
+3. `ordvik planning check`, commit the digest and the register
+   (`digest: <project> <date>`) and push.
 4. Post the operator a short version: the **Needs you** count and the top
    three, what agents merged (a count and anything reverted or path-rule),
    and anything broken. Link the digest file. A day where nothing needs the
