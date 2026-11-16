@@ -114,6 +114,15 @@ class AsksTest(unittest.TestCase):
         code, out = self.run_asks("status")
         self.assertIn("*302 Task 3", out)
 
+    def test_a_subheading_or_second_section_does_not_unmark_a_task(self):
+        doc = gated("308", ["Task 2: Parity check", "Task 3: Production rollout"], done=(1, 2)).replace(
+            "## Task 2: Step 2 — DONE",
+            "## Task 2: Step 2 — DONE\n\n### Task 2 result (2026-09-30): passed\n\n## Task 1: Audit (fresh session)")
+        self.repo.commit_docs({"308": doc})
+        asks = self.asks()
+        self.assertEqual(set(asks), {"dispatch:308:3"})
+        self.assertEqual(asks["dispatch:308:3"]["unmarked"], [])
+
     def test_a_gate_written_as_a_mapping_is_an_ask_until_answered(self):
         extra = textwrap.dedent("""\
             human_gates:

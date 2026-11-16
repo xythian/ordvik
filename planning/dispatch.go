@@ -139,7 +139,7 @@ func ParseDoc(layout, project, p, text string) *Doc {
 			if _, seen := d.Tasks[n]; !seen {
 				d.TaskOrder = append(d.TaskOrder, n)
 			}
-			d.Tasks[n] = doneMark.MatchString(m[2])
+			d.Tasks[n] = d.Tasks[n] || doneMark.MatchString(m[2])
 		}
 	}
 	if layout == LayoutRepo {
