@@ -57,7 +57,9 @@ ends without a commit.
 
 ### 1. Set up
 
-1. Fetch the planning repository and confirm the git identity is the
+1. Fetch the planning repository with full history (`git fetch
+   --unshallow origin` if `git rev-parse --is-shallow-repository` says
+   `true`; ages come from `git log`) and confirm the git identity is the
    operator's. Never commit as an agent.
 2. Read the run state. The run's window is from `last_run` to now.
 3. `ordvik planning projects` for the projects and the repositories each
@@ -91,6 +93,16 @@ superseded dispatch docs with `git mv`, fix every link that pointed at them
 (`git grep -n '<id>.md'`), close the thread files of threads that ended with a
 one-line outcome, and archive answered asks.
 
+### 3b. Clear settled stalls
+
+Where a project keeps a stall register (`<planning>/stalled.md`), remove
+each row whose unblocker happened, by the same evidence rule as closing: a
+merged PR, a shipped release tag, a doc now `done`. Flag, for the planner,
+a plan whose threads are all `done`, `superseded` or `dropped` (`ordvik
+planning status` says "close the plan") and a dispatch whose tasks are all
+done but which is still `active`. Add no rows: what is stalled and why is
+the planning pass's and the digest's judgment.
+
 ### 4. Check the invariants
 
 For every commit on the planning repository's `main` in the window:
@@ -114,7 +126,7 @@ planner's next pass.
 Append the run's lines to `<planning>/status/<date>-gardener.md` of each
 project it touched (date in the operator's time zone), under a `## HH:MM`
 heading, in the charter's **Reports** sections: Closed, Left for you to
-confirm, Tidied, Invariants, Stale. Update the run state, run
+confirm, Tidied, Invariants, Stale, Stalls cleared. Update the run state, run
 `ordvik planning check`, and commit everything as one commit whose message
 starts `gardener:` (for example `gardener: close 3 backlog items settled by
 merged PRs`). Push to `main`, rebasing if it moved.

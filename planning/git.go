@@ -39,8 +39,15 @@ func RepoRoot(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Fetch fetches origin quietly.
+// Fetch fetches origin quietly. A shallow clone is deepened to its full
+// history first: ask ages and staleness come from git log, and in a
+// shallow clone every file looks as new as the clone's oldest commit.
 func (g Git) Fetch() error {
+	if g.Shallow() {
+		if _, err := g.run("fetch", "-q", "--unshallow", "origin"); err == nil {
+			return nil
+		}
+	}
 	_, err := g.run("fetch", "-q", "origin")
 	return err
 }
