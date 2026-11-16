@@ -167,11 +167,16 @@ type gateEntry struct {
 	gateTasks map[string]bool
 }
 
+// taskMarks is whether each task of body is marked — DONE. A task is
+// done when any of its headings is marked: a later subheading such as
+// "### Task 7 result" or a second "## Task 5: Audit" section does not
+// unmark it.
 func taskMarks(body string) map[string]bool {
 	out := map[string]bool{}
 	for _, line := range strings.Split(body, "\n") {
 		if m := taskLine.FindStringSubmatch(line); m != nil {
-			out[strings.ToUpper(m[1])] = doneMark.MatchString(m[2])
+			id := strings.ToUpper(m[1])
+			out[id] = out[id] || doneMark.MatchString(m[2])
 		}
 	}
 	return out
