@@ -18,9 +18,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      # go.mod's go line is the oldest Go the module supports, not the one to
+      # test with: read from it, CI would run on a release that no longer
+      # gets fixes. Test on the current release; bump this with it.
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: "1.27.4"
       - run: python3 -c "import yaml" || pip install pyyaml
       - run: go vet ./...
       - run: go test ./...
